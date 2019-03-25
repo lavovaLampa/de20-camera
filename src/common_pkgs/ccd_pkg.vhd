@@ -3,21 +3,29 @@ use ieee.std_logic_1164.all;
 use ieee.numeric_std.all;
 
 package ccd_pkg is
-    subtype IMG_WIDTH_RANGE is natural range 0 to 2751 - 1;
-    subtype IMG_HEIGHT_RANGE is natural range 0 to 2001 - 1;
+    subtype CCD_WIDTH is natural range 0 to 2751;
+    subtype CCD_HEIGHT is natural range 0 to 2001;
 
-    type Ccd_Img_Properties is record
+    type Ccd_Properties is record
         -- including boundary region to eliminate errors when convoluting border pixels (size -> 1 row/col on either img side)
-        width         : IMG_WIDTH_RANGE;
-        height        : IMG_HEIGHT_RANGE;
+        width         : positive;
+        height        : positive;
         -- true active image size (excluding boundary region, dark region)
-        active_width  : IMG_WIDTH_RANGE;
-        active_height : IMG_HEIGHT_RANGE;
+        active_width  : positive;
+        active_height : positive;
         -- is chip outputting pixels mirrored
-        mirrored      : boolean;
+        is_mirrored   : boolean;
         -- length of pixel data vector
-        data_len      : natural;
-    end record Ccd_Img_Properties;
+        data_len      : positive;
+    end record Ccd_Properties;
+
+    type Image_Properties is record
+        width_start     : CCD_WIDTH;
+        height_start    : CCD_HEIGHT;
+        height          : CCD_HEIGHT;
+        width           : CCD_WIDTH;
+        pixel_data_size : positive;
+    end record Image_Properties;
 
     -- convolution kernel properties
     type Kernel_Properties is record
@@ -34,13 +42,21 @@ package ccd_pkg is
         stage4_len : natural;
     end record Adder_Tree_Props;
 
-    constant IMG_PARAMS : Ccd_Img_Properties := (
-        width         => 2594,
-        height        => 1946,
+    constant CCD_CONSTS : Ccd_Properties := (
+        width         => 2752,
+        height        => 2002,
         active_width  => 2592,
         active_height => 1944,
-        mirrored      => true,
+        is_mirrored   => true,
         data_len      => 12
+    );
+
+    constant IMG_CONSTS : Image_Properties := (
+        width_start     => 1055,
+        height_start    => 760,
+        height          => 480,
+        width           => 640,
+        pixel_data_size => 8
     );
 
     constant KERNEL_PARAMS : Kernel_Properties := (
@@ -56,26 +72,17 @@ package ccd_pkg is
         stage4_len => ((KERNEL_PARAMS.dim**2) / (2**4)) + ((KERNEL_PARAMS.dim**2) mod 2)
     );
 
-    constant MUL_RESULT_LEN : natural := (IMG_PARAMS.data_len + 1) + KERNEL_PARAMS.data_len;
+    constant MUL_RESULT_LEN : natural := (IMG_CONSTS.pixel_data_size + 1) + KERNEL_PARAMS.data_len;
 
-    subtype Ccd_Pixel_Data is unsigned((IMG_PARAMS.data_len - 1) downto 0);
-
-    type Color_Enable_Mux is record
-        red   : boolean;
-        green : boolean;
-        blue  : boolean;
-    end record Color_Enable_Mux;
-
-    type Color_Data_Mux is record
-        red   : Ccd_Pixel_Data;
-        green : Ccd_Pixel_Data;
-        blue  : Ccd_Pixel_Data;
-    end record Color_Data_Mux;
+    subtype Ccd_Pixel_Data is std_logic_vector((CCD_CONSTS.data_len - 1) downto 0);
+    subtype Pixel_Data is unsigned((IMG_CONSTS.pixel_data_size - 1) downto 0);
 
     type Pixel_Color is (Red, Green, Blue);
 
-    subtype Curr_Width_Range is natural range 0 to IMG_PARAMS.width - 1;
-    subtype Curr_Height_Range is natural range 0 to IMG_PARAMS.height - 1;
+    type Pixel_Matrix is array (2 downto 0, 2 downto 0) of Pixel_Data;
+
+    subtype Curr_Height_Range is natural range IMG_CONSTS.height_start to IMG_CONSTS.height_start + IMG_CONSTS.height;
+    subtype Curr_Width_Range is natural range IMG_CONSTS.width_start to IMG_CONSTS.width_start + IMG_CONSTS.width;
 
     subtype Kernel_Const_Data_Range is integer range -(2**(KERNEL_PARAMS.data_len - 1)) to ((2**(KERNEL_PARAMS.data_len - 1)) - 1);
 
@@ -83,7 +90,7 @@ package ccd_pkg is
     subtype Prescale_Range is integer range -12 to 12;
 
     -- register type to store raw (unsigned) pixel values (12b) for convolution kernel computation
-    type Ccd_Color_Matrix is array (((KERNEL_PARAMS.dim**2) - 1) downto 0) of Ccd_Pixel_Data;
+    type Ccd_Color_Matrix is array (((KERNEL_PARAMS.dim**2) - 1) downto 0) of Pixel_Data;
 
     -- type of accumulator to store values after multiplication
     type Mul_Acc is array (((KERNEL_PARAMS.dim**2) - 1) downto 0) of signed((MUL_RESULT_LEN - 1) downto 0);
@@ -103,49 +110,56 @@ package ccd_pkg is
     -- 9b signed kernel convolution constants
     type Kernel_Params_Arr is array (((KERNEL_PARAMS.dim**2) - 1) downto 0) of Kernel_Const_Data_Range;
 
-    function nextColor(currColor : Pixel_Color; firstSubpixelRow : boolean) return Pixel_Color;
-    function widen(val : signed) return signed;
-    function widen(val : unsigned) return unsigned;
-    function toSaturatedUnsigned(val : signed; outLen : natural) return unsigned;
+    pure function widen(val : signed) return signed;
+    pure function widen(val : unsigned) return unsigned;
+    pure function toSaturatedUnsigned(val : signed; outLen : natural) return unsigned;
+    pure function currColor(currWidth : CCD_WIDTH; currHeight : CCD_HEIGHT; isMirrored : boolean) return Pixel_Color;
 end package ccd_pkg;
 
 package body ccd_pkg is
-
-    function nextColor(currColor : Pixel_Color; firstSubpixelRow : boolean)
+    pure function decodeColor(isEvenRow : boolean; isEvenColumn : boolean)
     return Pixel_Color is
     begin
-        if currColor = Red or currColor = Blue then
-            return Green;
-        else
-            if IMG_PARAMS.mirrored then
-                if firstSubpixelRow then
-                    return Blue;
-                else
-                    return Red;
-                end if;
+        if isEvenColumn then
+            if isEvenRow then
+                return Green;
             else
-                if firstSubpixelRow then
-                    return Red;
-                else
-                    return Blue;
-                end if;
+                return Blue;
+            end if;
+        else
+            if isEvenRow then
+                return Red;
+            else
+                return Green;
             end if;
         end if;
-    end function nextColor;
+    end function decodeColor;
 
-    function widen(val : signed)
+    pure function currColor(currWidth : CCD_WIDTH; currHeight : CCD_HEIGHT; isMirrored : boolean)
+    return Pixel_Color is
+        variable isEvenRow    : boolean := currHeight mod 2 = 0;
+        variable isEvenColumn : boolean := currWidth mod 2 = 0;
+    begin
+        if isMirrored then
+            return decodeColor(not isEvenRow, not isEvenColumn);
+        else
+            return decodeColor(isEvenRow, isEvenColumn);
+        end if;
+    end function currColor;
+
+    pure function widen(val : signed)
     return signed is
     begin
         return resize(val, val'length + 1);
     end function widen;
 
-    function widen(val : unsigned)
+    pure function widen(val : unsigned)
     return unsigned is
     begin
         return resize(val, val'length + 1);
     end function widen;
 
-    function toSaturatedUnsigned(val : signed; outLen : natural)
+    pure function toSaturatedUnsigned(val : signed; outLen : natural)
     return unsigned is
         variable temp : unsigned((outLen - 1) downto 0);
     begin

@@ -6,18 +6,23 @@ use work.ccd_pkg.all;
 entity color_kernel is
     generic(
         -- edge detection kernel
-        kernelParams   : Kernel_Params_Arr  := (
+        kernelParams   : Kernel_Params_Arr := (
             -1, -1, -1,
-            -1,  8, -1,
+            -1, 8, -1,
             -1, -1, -1
         );
-        prescaleAmount : Prescale_Range := 0
+        prescaleAmount : Prescale_Range    := 0
     );
     port(
-        clkIn, rstAsyncIn : in  std_logic;
-        dataIn            : in  Ccd_Color_Matrix;
-        enableIn          : in  boolean;
-        dataOut           : out Ccd_Pixel_Data := X"000"
+        clkIn, rstAsyncIn         : in  std_logic;
+        redIn, greenIn, blueIn    : in  Pixel_Data;
+        pixelValidIn              : in  boolean;
+        currXIn                   : in  Curr_Width_Range;
+        currYIn                   : in  Curr_Height_Range;
+        redOut, greenOut, blueOut : out Pixel_Data;
+        currXOut                  : out Curr_Width_Range;
+        currYOut                  : out Curr_Height_Range;
+        validOut                  : out boolean
     );
     type Adder_Tree is record
         stage1 : Adder_Acc_1;
@@ -39,13 +44,13 @@ begin
         variable tempVal : signed(25 downto 0);
     begin
         if rstAsyncIn = '1' then
-            mulAcc         <= (others => (others => '0'));
-            addTree.stage1 <= (others => (others => '0'));
-            addTree.stage2 <= (others => (others => '0'));
-            addTree.stage3 <= (others => (others => '0'));
-            tempVal        := (others => '0');
+            mulAcc  <= (others => (others => '0'));
+            addTree.stage1         <= (others => (others => '0'));
+            addTree.stage2         <= (others => (others => '0'));
+            addTree.stage3         <= (others => (others => '0'));
+            tempVal := (others => '0');
         elsif rising_edge(clkIn) then
-            if enableIn then
+            if pixelValidIn then
                 for i in dataIn'low to dataIn'high loop
                     -- signed 13b * signed 9b = signed 21b
                     mulAcc(i) <= signed(resize(dataIn(i), dataIn(0)'length + 1)) * to_signed(kernelParams(i), KERNEL_PARAMS.data_len);

@@ -7,10 +7,10 @@ entity ccd_bayer_to_rgb_shiftreg is
     port(
         clkIn, rstAsyncIn : in  std_logic;
         enableIn          : in  boolean;
-        dataIn            : in  Ccd_Pixel_Data;
-        dataOut           : out Ccd_Pixel_Data := X"000"
+        dataIn            : in  Pixel_Data;
+        dataOut           : out Pixel_Data := X"000"
     );
-    type Green_ShiftReg_Array is array ((IMG_PARAMS.width + 1) downto 0) of Ccd_Pixel_Data;
+    type Green_ShiftReg_Array is array ((IMG_PARAMS.width + 1) downto 0) of Pixel_Data;
 end entity ccd_bayer_to_rgb_shiftreg;
 
 architecture RTL of ccd_bayer_to_rgb_shiftreg is
