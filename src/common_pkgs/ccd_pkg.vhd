@@ -13,17 +13,22 @@ package ccd_pkg is
         -- true active image size (excluding boundary region, dark region)
         active_width  : positive;
         active_height : positive;
-        -- is chip outputting pixels mirrored
-        is_mirrored   : boolean;
         -- length of pixel data vector
         data_len      : positive;
     end record Ccd_Properties;
 
     type Image_Properties is record
+        -- from which column are we starting readout
         width_start     : CCD_WIDTH;
+        -- from which row are we starting readout
         height_start    : CCD_HEIGHT;
+        -- image height (including pixels only used to avoid fringing)
         height          : CCD_HEIGHT;
+        -- image width (including pixels only used to avoid fringing)
         width           : CCD_WIDTH;
+        -- is chip outputting pixels mirrored
+        is_mirrored     : boolean;
+        -- how much pixel data do we really use/need
         pixel_data_size : positive;
     end record Image_Properties;
 
@@ -47,15 +52,15 @@ package ccd_pkg is
         height        => 2002,
         active_width  => 2592,
         active_height => 1944,
-        is_mirrored   => true,
         data_len      => 12
     );
 
     constant IMG_CONSTS : Image_Properties := (
-        width_start     => 1055,
-        height_start    => 760,
-        height          => 480,
-        width           => 640,
+        width_start     => 1054,
+        height_start    => 759,
+        height          => 482,
+        width           => 642,
+        is_mirrored     => true,
         pixel_data_size => 8
     );
 
@@ -73,16 +78,17 @@ package ccd_pkg is
     );
 
     constant MUL_RESULT_LEN : natural := (IMG_CONSTS.pixel_data_size + 1) + KERNEL_PARAMS.data_len;
+    constant SHIFT_AMOUNT   : natural := (IMG_CONSTS.width * 2) + 3;
 
     subtype Ccd_Pixel_Data is std_logic_vector((CCD_CONSTS.data_len - 1) downto 0);
     subtype Pixel_Data is unsigned((IMG_CONSTS.pixel_data_size - 1) downto 0);
 
-    type Pixel_Color is (Red, Green, Blue);
+    type Pixel_Color is (Red, Green1, Green2, Blue);
 
     type Pixel_Matrix is array (2 downto 0, 2 downto 0) of Pixel_Data;
 
-    subtype Curr_Height_Range is natural range IMG_CONSTS.height_start to IMG_CONSTS.height_start + IMG_CONSTS.height;
-    subtype Curr_Width_Range is natural range IMG_CONSTS.width_start to IMG_CONSTS.width_start + IMG_CONSTS.width;
+    subtype Img_Height_Range is natural range 0 to IMG_CONSTS.height;
+    subtype Img_Width_Range is natural range 0 to IMG_CONSTS.width;
 
     subtype Kernel_Const_Data_Range is integer range -(2**(KERNEL_PARAMS.data_len - 1)) to ((2**(KERNEL_PARAMS.data_len - 1)) - 1);
 
@@ -113,7 +119,7 @@ package ccd_pkg is
     pure function widen(val : signed) return signed;
     pure function widen(val : unsigned) return unsigned;
     pure function toSaturatedUnsigned(val : signed; outLen : natural) return unsigned;
-    pure function currColor(currWidth : CCD_WIDTH; currHeight : CCD_HEIGHT; isMirrored : boolean) return Pixel_Color;
+    pure function getCurrColor(currWidth : Img_Width_Range; currHeight : Img_Height_Range) return Pixel_Color;
 end package ccd_pkg;
 
 package body ccd_pkg is
@@ -122,7 +128,7 @@ package body ccd_pkg is
     begin
         if isEvenColumn then
             if isEvenRow then
-                return Green;
+                return Green1;
             else
                 return Blue;
             end if;
@@ -130,12 +136,12 @@ package body ccd_pkg is
             if isEvenRow then
                 return Red;
             else
-                return Green;
+                return Green2;
             end if;
         end if;
     end function decodeColor;
 
-    pure function currColor(currWidth : CCD_WIDTH; currHeight : CCD_HEIGHT; isMirrored : boolean)
+    pure function currColorAbsolute(currWidth : CCD_WIDTH; currHeight : CCD_HEIGHT; isMirrored : boolean)
     return Pixel_Color is
         variable isEvenRow    : boolean := currHeight mod 2 = 0;
         variable isEvenColumn : boolean := currWidth mod 2 = 0;
@@ -145,7 +151,15 @@ package body ccd_pkg is
         else
             return decodeColor(isEvenRow, isEvenColumn);
         end if;
-    end function currColor;
+    end function currColorAbsolute;
+
+    pure function getCurrColor(currWidth : Img_Width_Range; currHeight : Img_Height_Range)
+    return Pixel_Color is
+        variable absoluteWidth  : CCD_WIDTH  := IMG_CONSTS.width_start + currWidth;
+        variable absoluteHeight : CCD_HEIGHT := IMG_CONSTS.height_start + currHeight;
+    begin
+        return currColorAbsolute(absoluteWidth, absoluteHeight, IMG_CONSTS.is_mirrored);
+    end function getCurrColor;
 
     pure function widen(val : signed)
     return signed is

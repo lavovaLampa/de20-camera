@@ -9,6 +9,11 @@ package i2c_pkg is
     constant CCD_READ_ADDR  : std_logic_vector((ADDR_WIDTH - 1) downto 0) := X"BB";
     constant CCD_WRITE_ADDR : std_logic_vector((ADDR_WIDTH - 1) downto 0) := X"BA";
 
+    constant FULL_WIDTH : natural := (ADDR_WIDTH * 2) + DATA_WIDTH;
+
+    type FSM_State is (WaitForEnable, SendData, SendStop);
+    type ACK_State is (WaitForAck, ReleaseLine, ReadAck);
+
     function logicToI2CBusState(val : std_logic) return std_logic;
 end package i2c_pkg;
 

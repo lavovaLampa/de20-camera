@@ -16,9 +16,6 @@ entity i2c_ctrl is
         sClkOut               : out   std_logic := '1';
         sDataIO               : inout std_logic := 'Z' -- 1 == 'Z', 0 == '0' (i2c spec)
     );
-    type FSM_State is (WaitForEnable, SendData, SendStop);
-    type ACK_State is (WaitForAck, ReleaseLine, ReadAck);
-    constant FULL_WIDTH : natural := (ADDR_WIDTH * 2) + DATA_WIDTH;
 end entity i2c_ctrl;
 
 architecture behavioral of i2c_ctrl is

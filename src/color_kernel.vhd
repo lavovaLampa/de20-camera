@@ -17,11 +17,11 @@ entity color_kernel is
         clkIn, rstAsyncIn         : in  std_logic;
         redIn, greenIn, blueIn    : in  Pixel_Data;
         pixelValidIn              : in  boolean;
-        currXIn                   : in  Curr_Width_Range;
-        currYIn                   : in  Curr_Height_Range;
+        currXIn                   : in  Img_Width_Range;
+        currYIn                   : in  Img_Height_Range;
         redOut, greenOut, blueOut : out Pixel_Data;
-        currXOut                  : out Curr_Width_Range;
-        currYOut                  : out Curr_Height_Range;
+        currXOut                  : out Img_Width_Range;
+        currYOut                  : out Img_Height_Range;
         validOut                  : out boolean
     );
     type Adder_Tree is record
@@ -86,7 +86,6 @@ begin
                 end if;
 
                 -- TODO: test this function
-                dataOut <= toSaturatedUnsigned(tempVal, dataOut'length);
 
             end if;
         end if;
