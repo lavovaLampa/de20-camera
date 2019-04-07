@@ -3,7 +3,7 @@ use ieee.std_logic_1164.all;
 use ieee.numeric_std.all;
 use work.ccd_pkg.all;
 
-entity ccd_color_shiftreg is
+entity pixel_shiftreg is
     port(
         clkIn, rstAsyncIn : in  std_logic;
         dataIn            : in  Pixel_Data;
@@ -13,9 +13,9 @@ entity ccd_color_shiftreg is
 
     type Color_ShiftReg_Array is array (SHIFT_AMOUNT - 1 downto 0) of Pixel_Data;
     alias IMG_WIDTH is IMG_CONSTS.width;
-end entity ccd_color_shiftreg;
+end entity pixel_shiftreg;
 
-architecture RTL of ccd_color_shiftreg is
+architecture RTL of pixel_shiftreg is
     signal shiftReg : Color_ShiftReg_Array := (others => (others => '0'));
 
 begin

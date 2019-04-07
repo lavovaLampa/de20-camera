@@ -22,7 +22,7 @@ entity color_kernel is
         redOut, greenOut, blueOut : out Pixel_Data;
         currXOut                  : out Img_Width_Range;
         currYOut                  : out Img_Height_Range;
-        validOut                  : out boolean
+        pixelValidOut             : out boolean
     );
     type Adder_Tree is record
         stage1 : Adder_Acc_1;
@@ -44,11 +44,11 @@ begin
         variable tempVal : signed(25 downto 0);
     begin
         if rstAsyncIn = '1' then
-            mulAcc  <= (others => (others => '0'));
-            addTree.stage1         <= (others => (others => '0'));
-            addTree.stage2         <= (others => (others => '0'));
-            addTree.stage3         <= (others => (others => '0'));
-            tempVal := (others => '0');
+            mulAcc         <= (others => (others => '0'));
+            addTree.stage1 <= (others => (others => '0'));
+            addTree.stage2 <= (others => (others => '0'));
+            addTree.stage3 <= (others => (others => '0'));
+            tempVal        := (others => '0');
         elsif rising_edge(clkIn) then
             if pixelValidIn then
                 for i in dataIn'low to dataIn'high loop

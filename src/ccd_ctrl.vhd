@@ -31,7 +31,7 @@ architecture RTL of ccd_ctrl is
     signal currPixelMatrix : Pixel_Matrix := (others => (others => X"00"));
 begin
 
-    pixelShiftReg : entity work.ccd_color_shiftreg
+    pixelShiftReg : entity work.pixel_shiftreg
         port map(
             clkIn      => clkIn,
             rstAsyncIn => rstAsyncIn,
