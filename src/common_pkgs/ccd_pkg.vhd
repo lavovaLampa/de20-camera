@@ -60,7 +60,7 @@ package ccd_pkg is
         height_start    => 759,
         height          => 482,
         width           => 642,
-        is_mirrored     => true,
+        is_mirrored     => false,
         pixel_data_size => 8
     );
 
@@ -78,10 +78,11 @@ package ccd_pkg is
     );
 
     constant MUL_RESULT_LEN : natural := (IMG_CONSTS.pixel_data_size + 1) + KERNEL_PARAMS.data_len;
-    constant SHIFT_AMOUNT   : natural := (IMG_CONSTS.width * 2) + 3;
+    constant SHIFT_LEN      : natural := (IMG_CONSTS.width * 2) + 3;
 
     subtype Ccd_Pixel_Data is std_logic_vector((CCD_CONSTS.data_len - 1) downto 0);
     subtype Pixel_Data is unsigned((IMG_CONSTS.pixel_data_size - 1) downto 0);
+    subtype Pixel_Count_Range is natural range 0 to (IMG_CONSTS.width * IMG_CONSTS.height);
 
     type Pixel_Color is (Red, Green1, Green2, Blue);
 

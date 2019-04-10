@@ -1,0 +1,28 @@
+v 4
+file "/home/lavaLamp/Documents/git/de20-camera/" "src/common_pkgs/i2c_pkg.vhd" "368be144e78fdc9e89ac2afd13b72649f4b4cfe6" "20190408195557.076":
+  package i2c_pkg at 1( 0) + 0 on 4;
+  package body i2c_pkg at 20( 852) + 0 on 4;
+file "/home/lavaLamp/Documents/git/de20-camera/" "src/common_pkgs/ccd_pkg.vhd" "acf72938673a298d03f9b97a10aaab503daab3c4" "20190408203729.126":
+  package ccd_pkg at 1( 0) + 0 on 25 body;
+  package body ccd_pkg at 126( 5507) + 0 on 26;
+file "/home/lavaLamp/Documents/git/de20-camera/" "src/reset_ctrl.vhd" "165773d7dab717c98d4effe915005fdc65860320" "20190408195516.069":
+  entity reset_ctrl at 1( 0) + 0 on 4;
+  architecture rtl of reset_ctrl at 18( 440) + 0 on 4;
+file "/home/lavaLamp/Documents/git/de20-camera/" "src/pixel_shiftreg.vhd" "20b59b55d53b2bd9aaab1c7419380baf98c7356b" "20190408203729.126":
+  entity pixel_shiftreg at 1( 0) + 0 on 29;
+  architecture rtl of pixel_shiftreg at 18( 473) + 0 on 30;
+file "/home/lavaLamp/Documents/git/de20-camera/" "src/i2c_ctrl.vhd" "6d71022c58e443f8f53853b406a0e8c08b716cd0" "20190408195516.068":
+  entity i2c_ctrl at 1( 0) + 0 on 4;
+  architecture behavioral of i2c_ctrl at 21( 803) + 0 on 4;
+file "/home/lavaLamp/Documents/git/de20-camera/" "src/i2c_ccd_config.vhd" "74aa654ab057f5e9c34195cd9de35dbdf65b7ad1" "20190408195516.068":
+  entity i2c_ccd_config at 1( 0) + 0 on 4;
+  architecture rtl of i2c_ccd_config at 25( 932) + 0 on 4;
+file "/home/lavaLamp/Documents/git/de20-camera/" "src/color_kernel.vhd" "ed6990ed1cb379d213d1fc6c745b1c3eb399a864" "20190408195516.068":
+  entity color_kernel at 1( 0) + 0 on 4;
+  architecture rtl of color_kernel at 34( 1050) + 0 on 4;
+file "/home/lavaLamp/Documents/git/de20-camera/" "src/ccd_ctrl.vhd" "7262914ac77c4748ba3a6557da7cf1fcb2d731a0" "20190409021401.487":
+  entity ccd_ctrl at 1( 0) + 0 on 39;
+  architecture rtl of ccd_ctrl at 20( 626) + 0 on 40;
+file "/home/lavaLamp/Documents/git/de20-camera/" "tb/ccd_ctrl_tb.vhd" "02a8cf877553f23ffb45c0b5f44f4f89132c7688" "20190410022223.504":
+  entity ccd_ctrl_tb at 5( 118) + 0 on 47;
+  architecture test of ccd_ctrl_tb at 25( 671) + 0 on 48;

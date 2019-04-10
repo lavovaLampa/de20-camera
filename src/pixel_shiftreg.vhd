@@ -11,7 +11,7 @@ entity pixel_shiftreg is
         pixelsOut         : out Pixel_Matrix
     );
 
-    type Color_ShiftReg_Array is array (SHIFT_AMOUNT - 1 downto 0) of Pixel_Data;
+    type Color_ShiftReg_Array is array (SHIFT_LEN - 1 downto 0) of Pixel_Data;
     alias IMG_WIDTH is IMG_CONSTS.width;
 end entity pixel_shiftreg;
 

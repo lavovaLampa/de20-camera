@@ -18,18 +18,18 @@ entity ccd_ctrl is
 end entity ccd_ctrl;
 
 architecture RTL of ccd_ctrl is
-    -- set in controlProc
-    signal currPixelValid : boolean := true;
-    signal pixelCounter   : natural := 0;
-
-    -- set in demosaicProc
-    signal currWidth  : Img_Width_Range  := 0;
-    signal currHeight : Img_Height_Range := 0;
-    signal currColor  : Pixel_Color      := getCurrColor(currWidth, currHeight);
-
     -- pixel shift register OUTPUT
     signal currPixelMatrix : Pixel_Matrix := (others => (others => X"00"));
+
+    signal currPixelValid : boolean           := true;
+    signal pixelCounter   : Pixel_Count_Range := 0;
+    signal currWidth      : Img_Width_Range   := 0;
+    signal currHeight     : Img_Height_Range  := 0;
+    signal currColorDbg   : Pixel_Color       := Green1;
 begin
+
+    -- self-explanatory, is current pixel valid?
+    currPixelValid <= frameValidIn = '1' and lineValidIn = '1';
 
     pixelShiftReg : entity work.pixel_shiftreg
         port map(
@@ -42,45 +42,38 @@ begin
         );
 
     controlProc : process(clkIn, rstAsyncIn)
+        variable currColor : Pixel_Color := getCurrColor(currWidth, currHeight);
     begin
         if rstAsyncIn = '1' then
-            currPixelValid <= true;
-            pixelCounter   <= 0;
+            currWidth    <= 0;
+            currHeight   <= 0;
+            pixelCounter <= 0;
+            redOut       <= X"00";
+            greenOut     <= X"00";
+            blueOut      <= X"00";
         elsif rising_edge(clkIn) then
-            -- self-explanatory, is current pixel valid?
-            currPixelValid <= frameValidIn = '1' and lineValidIn = '1';
+            currColor := getCurrColor(currWidth, currHeight);
+            -- debug statement
+            currColorDbg <= currColor;
 
-            if frameValidIn = '1' and lineValidIn = '1' then
-                -- increment pixel count
+            -- counter logic
+            if currPixelValid then
                 pixelCounter <= pixelCounter + 1;
-            elsif frameValidIn = '0' and lineValidIn = '0' then
-                pixelCounter <= 0;
-            end if;
-        end if;
-    end process controlProc;
 
-    demosaicProc : process(clkIn, rstAsyncIn)
-    begin
-        if rstAsyncIn = '1' then
-            currWidth     <= 0;
-            currHeight    <= 0;
-            currColor     <= getCurrColor(0, 0);
-            pixelValidOut <= false;
-        elsif rising_edge(clkIn) then
-            currColor <= getCurrColor(currWidth, currHeight);
-
-            -- reset counter on start of new frame
-            if pixelCounter = 0 then
-                currWidth     <= 0;
-                currHeight    <= 0;
-            -- if we have enough data in shift register, we can start demosaicing
-            elsif currPixelValid and pixelCounter >= SHIFT_AMOUNT then
-                if currWidth >= IMG_WIDTH - 1 then
-                    currWidth  <= 0;
-                    currHeight <= currHeight + 1;
-                else
-                    currWidth <= currWidth + 1;
+                -- current width & height of pixel in shift register
+                if pixelCounter > IMG_WIDTH + 1 then
+                    if currWidth >= IMG_WIDTH - 1 then
+                        currWidth  <= 0;
+                        currHeight <= currHeight + 1;
+                    else
+                        currWidth <= currWidth + 1;
+                    end if;
                 end if;
+            elsif frameValidIn = '0' and lineValidIn = '0' then
+                -- reset counters on start of new frame
+                pixelCounter <= 0;
+                currWidth    <= 0;
+                currHeight   <= 0;
             end if;
 
             -- demosaicing
@@ -100,13 +93,19 @@ begin
                 redOut   <= (currPixelMatrix(0, 1) + currPixelMatrix(2, 1)) / 2;
                 greenOut <= currPixelMatrix(1, 1);
                 blueOut  <= (currPixelMatrix(1, 0) + currPixelMatrix(1, 2)) / 2;
+            else
+                redOut   <= X"00";
+                greenOut <= X"00";
+                blueOut  <= X"00";
             end if;
+
         end if;
-    end process demosaicProc;
+    end process controlProc;
 
     -- asign out signals
-    pixelValidOut <= currPixelValid and pixelCounter >= SHIFT_AMOUNT;
-    currXOut <= currWidth;
-    currYOut <= currHeight;
+    -- skip image fringes (upper, lower, left, right)
+    pixelValidOut <= currPixelValid and (currHeight > 0 and currHeight < IMG_HEIGHT - 1) and (currWidth > 0 and currWidth < IMG_WIDTH - 1);
+    currXOut      <= currWidth;
+    currYOut      <= currHeight;
 
 end architecture RTL;
