@@ -21,11 +21,14 @@ architecture RTL of ccd_ctrl is
     -- pixel shift register OUTPUT
     signal currPixelMatrix : Pixel_Matrix := (others => (others => X"00"));
 
-    signal currPixelValid : boolean           := true;
-    signal pixelCounter   : Pixel_Count_Range := 0;
-    signal currWidth      : Img_Width_Range   := 0;
-    signal currHeight     : Img_Height_Range  := 0;
-    signal currColorDbg   : Pixel_Color       := Green1;
+    signal currPixelValid  : boolean           := true;
+    signal pixelCounter    : Pixel_Count_Range := 0;
+    signal currShiftWidth  : Img_Width_Range   := 0;
+    signal currShiftHeight : Img_Height_Range  := 0;
+
+    signal widthOut    : Img_Width_Range  := 0;
+    signal heightOut   : Img_Height_Range := 0;
+    signal hasNewPixel : boolean          := false;
 begin
 
     -- self-explanatory, is current pixel valid?
@@ -41,39 +44,73 @@ begin
             pixelsOut  => currPixelMatrix
         );
 
-    controlProc : process(clkIn, rstAsyncIn)
-        variable currColor : Pixel_Color := getCurrColor(currWidth, currHeight);
+    shiftProc : process(clkIn, rstAsyncIn)
     begin
         if rstAsyncIn = '1' then
-            currWidth    <= 0;
-            currHeight   <= 0;
-            pixelCounter <= 0;
-            redOut       <= X"00";
-            greenOut     <= X"00";
-            blueOut      <= X"00";
+            currShiftWidth  <= 0;
+            currShiftHeight <= 0;
+            pixelCounter    <= 0;
         elsif rising_edge(clkIn) then
-            currColor := getCurrColor(currWidth, currHeight);
-            -- debug statement
-            currColorDbg <= currColor;
 
             -- counter logic
             if currPixelValid then
+                -- counts received valid pixels in current frame
                 pixelCounter <= pixelCounter + 1;
+
+                hasNewPixel <= true;
 
                 -- current width & height of pixel in shift register
                 if pixelCounter > IMG_WIDTH + 1 then
-                    if currWidth >= IMG_WIDTH - 1 then
-                        currWidth  <= 0;
-                        currHeight <= currHeight + 1;
+                    if currShiftWidth >= IMG_WIDTH - 1 then
+                        currShiftWidth  <= 0;
+                        currShiftHeight <= currShiftHeight + 1;
                     else
-                        currWidth <= currWidth + 1;
+                        currShiftWidth <= currShiftWidth + 1;
                     end if;
                 end if;
+
             elsif frameValidIn = '0' and lineValidIn = '0' then
                 -- reset counters on start of new frame
-                pixelCounter <= 0;
-                currWidth    <= 0;
-                currHeight   <= 0;
+                pixelCounter    <= 0;
+                currShiftWidth  <= 0;
+                currShiftHeight <= 0;
+                hasNewPixel     <= false;
+            else
+                hasNewPixel <= false;
+            end if;
+
+        end if;
+    end process shiftProc;
+
+    demosaicProc : process(clkIn, rstAsyncIn)
+        variable currColor : Pixel_Color := getCurrColor(currShiftWidth, currShiftHeight);
+    begin
+        if rstAsyncIn = '1' then
+            redOut        <= X"00";
+            greenOut      <= X"00";
+            blueOut       <= X"00";
+            pixelValidOut <= false;
+            widthOut      <= 0;
+            heightOut     <= 0;
+        elsif rising_edge(clkIn) then
+            currColor     := getCurrColor(currShiftWidth, currShiftHeight);
+            pixelValidOut <= hasNewPixel and currShiftHeight > 0 and currShiftHeight < IMG_WIDTH - 1 and currShiftWidth > 0 and currShiftWidth < IMG_WIDTH - 1;
+
+            -- ignore image fringes
+            if not (currShiftHeight = 0 or currShiftHeight = IMG_HEIGHT - 1 or currShiftWidth = 0 or currShiftWidth = IMG_WIDTH - 1) then
+                if hasNewPixel then
+                    if widthOut >= IMG_WIDTH - 3 then
+                        widthOut  <= 0;
+                        heightOut <= heightOut + 1;
+                    elsif currShiftHeight = 1 and currShiftWidth = 1 then
+                        widthOut <= 0;
+                    else
+                        widthOut <= widthOut + 1;
+                    end if;
+                end if;
+            elsif pixelCounter = 0 then
+                heightOut <= 0;
+                widthOut  <= 0;
             end if;
 
             -- demosaicing
@@ -98,14 +135,12 @@ begin
                 greenOut <= X"00";
                 blueOut  <= X"00";
             end if;
-
         end if;
-    end process controlProc;
+    end process demosaicProc;
 
-    -- asign out signals
+    -- assign out signals
     -- skip image fringes (upper, lower, left, right)
-    pixelValidOut <= currPixelValid and (currHeight > 0 and currHeight < IMG_HEIGHT - 1) and (currWidth > 0 and currWidth < IMG_WIDTH - 1);
-    currXOut      <= currWidth;
-    currYOut      <= currHeight;
+    currXOut <= widthOut;
+    currYOut <= heightOut;
 
 end architecture RTL;

@@ -88,8 +88,8 @@ package ccd_pkg is
 
     type Pixel_Matrix is array (2 downto 0, 2 downto 0) of Pixel_Data;
 
-    subtype Img_Height_Range is natural range 0 to IMG_CONSTS.height;
-    subtype Img_Width_Range is natural range 0 to IMG_CONSTS.width;
+    subtype Img_Height_Range is natural range 0 to IMG_CONSTS.height - 1;
+    subtype Img_Width_Range is natural range 0 to IMG_CONSTS.width - 1;
 
     subtype Kernel_Const_Data_Range is integer range -(2**(KERNEL_PARAMS.data_len - 1)) to ((2**(KERNEL_PARAMS.data_len - 1)) - 1);
 

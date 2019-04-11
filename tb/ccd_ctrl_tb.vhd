@@ -7,6 +7,7 @@ use ieee.std_logic_1164.all;
 use work.ccd_pkg.all;
 use std.textio.all;
 use work.ccd_ctrl;
+use ieee.numeric_std.all;
 
 entity ccd_ctrl_tb is
     alias IMG_WIDTH is IMG_CONSTS.width;
@@ -22,8 +23,6 @@ entity ccd_ctrl_tb is
     constant VBLANK_CLKS : positive := 10;
 end ccd_ctrl_tb;
 
-library ieee;
-use ieee.numeric_std.all;
 architecture test of ccd_ctrl_tb is
 
     signal clkIn         : std_logic      := '0';
@@ -64,6 +63,7 @@ begin
 
     stimuli : process
         variable pixelArray : Ccd_Image_Acc := (others => (others => X"000"));
+        variable temp : std_logic_vector(7 downto 0) := X"00";
     begin
         frameValidIn <= '0';
         lineValidIn  <= '0';
@@ -75,7 +75,6 @@ begin
         wait for 2 * CLK_PERIOD;
         rstAsyncIn <= '0';
         wait for 2 * CLK_PERIOD;
-        wait for 10 * CLK_PERIOD;
         wait until falling_edge(clkIn);
 
         for frameCount in 0 to 1 loop
@@ -83,14 +82,15 @@ begin
             wait for 2 * CLK_PERIOD;
 
             for y in 0 to IMG_HEIGHT - 1 loop
+                lineValidIn <= '1';
+
                 for x in 0 to IMG_WIDTH - 1 loop
-                    lineValidIn <= '1';
-
-                    pixelDataIn <= std_logic_vector(to_unsigned(x, pixelDataIn'length));
-                    --                    pixelArray(y, x) := X"001";
-
                     wait until falling_edge(clkIn);
+
+                    temp := std_logic_vector(to_unsigned(x, temp'length));
+                    pixelDataIn(11 downto 4) <= temp;
                 end loop;
+                wait until falling_edge(clkIn);
 
                 lineValidIn <= '0';
                 pixelDataIn <= X"000";

@@ -12,7 +12,7 @@ entity pixel_shiftreg is
     );
 
     type Color_ShiftReg_Array is array (SHIFT_LEN - 1 downto 0) of Pixel_Data;
-    alias IMG_WIDTH is IMG_CONSTS.width;
+    alias WIDTH is IMG_CONSTS.width;
 end entity pixel_shiftreg;
 
 architecture RTL of pixel_shiftreg is
@@ -30,13 +30,13 @@ begin
     end process shiftProc;
 
     -- TODO: nutne premysliet
-    pixelsOut(0, 0) <= shiftReg(0);
+    pixelsOut(0, 0) <= shiftReg(2);
     pixelsOut(0, 1) <= shiftReg(1);
-    pixelsOut(0, 2) <= shiftReg(2);
-    pixelsOut(1, 0) <= shiftReg(IMG_WIDTH);
-    pixelsOut(1, 1) <= shiftReg(IMG_WIDTH + 1);
-    pixelsOut(1, 2) <= shiftReg(IMG_WIDTH + 2);
-    pixelsOut(2, 0) <= shiftReg(shiftReg'high - 2);
-    pixelsOut(2, 1) <= shiftReg(shiftReg'high - 1);
-    pixelsOut(2, 2) <= shiftReg(shiftReg'high);
+    pixelsOut(0, 2) <= shiftReg(0);
+    pixelsOut(1, 0) <= shiftReg(WIDTH + 2);
+    pixelsOut(1, 1) <= shiftReg(WIDTH + 1);
+    pixelsOut(1, 2) <= shiftReg(WIDTH);
+    pixelsOut(2, 0) <= shiftReg((2 * WIDTH) + 2);
+    pixelsOut(2, 1) <= shiftReg((2 * WIDTH) + 1);
+    pixelsOut(2, 2) <= shiftReg(2 * WIDTH);
 end architecture RTL;
