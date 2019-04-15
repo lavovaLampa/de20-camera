@@ -12,10 +12,15 @@ use ieee.numeric_std.all;
 entity ccd_ctrl_tb is
     alias IMG_WIDTH is IMG_CONSTS.width;
     alias IMG_HEIGHT is IMG_CONSTS.height;
+    alias PIXEL_SIZE is IMG_CONSTS.pixel_data_size;
+    constant PIPELINE_SIZE : natural := PIXEL_SIZE + 2;
+    -- pipeline stage has to be wide enough not to overflow during addition
+    subtype Pipeline_Pixel is unsigned(PIPELINE_SIZE - 1 downto 0);
+    subtype Pixel_Range is natural range PIXEL_SIZE - 1 downto 0;
+    -- image value accumulator (we have to remember to check if pixels were computed successfully)
+    type Ccd_Image_Acc is array (0 to IMG_HEIGHT - 1, 0 to IMG_WIDTH - 1) of Ccd_Pixel_Data;
 
-    type Ccd_Image_Acc is array (0 to IMG_HEIGHT - 1, 0 to IMG_WIDTH - 1) of Pixel_Data;
-
-    constant CLK_PERIOD : time := 20 ns; -- EDIT Put right period here
+    constant CLK_PERIOD : time := 20 ns; -- 50 MHz clock
 
     -- real constants are way higher
     -- TODO: consult documentation
@@ -25,6 +30,7 @@ end ccd_ctrl_tb;
 
 architecture test of ccd_ctrl_tb is
 
+    -- dut interfacing signals
     signal clkIn         : std_logic      := '0';
     signal rstAsyncIn    : std_logic      := '0';
     signal frameValidIn  : std_logic      := '0';
@@ -38,8 +44,17 @@ architecture test of ccd_ctrl_tb is
     signal pixelValidOut : boolean;
 
     -- testbench signals
-    signal TbClock    : std_logic := '0';
-    signal TbSimEnded : std_logic := '0';
+    signal tbClock    : std_logic := '0';
+    signal tbSimEnded : std_logic := '0';
+
+    -- internal testbench signals
+    signal pixelMatrix : Ccd_Image_Acc := (others => (others => X"000"));
+
+    pure function matrixToPixel(logicPixel : Ccd_Pixel_Data) return Pixel_Data is
+    begin
+        return resize(unsigned(logicPixel), PIPELINE_SIZE);
+    end function matrixToPixel;
+
 begin
 
     dut : entity ccd_ctrl
@@ -56,43 +71,36 @@ begin
                  pixelValidOut => pixelValidOut);
 
     -- Clock generation
-    TbClock <= not TbClock after CLK_PERIOD / 2 when TbSimEnded /= '1' else '0';
-
-    -- EDIT: Check that clkIn is really your main clock signal
-    clkIn <= TbClock;
+    tbClock <= not tbClock after CLK_PERIOD / 2 when tbSimEnded /= '1' else '0';
+    clkIn   <= tbClock;
 
     stimuli : process
+        variable pixelDataAcc : Ccd_Pixel_Data;
     begin
-        frameValidIn <= '0';
-        lineValidIn  <= '0';
-        pixelDataIn  <= X"000";
-
-        -- Reset generation
-        -- EDIT: Check that rstAsyncIn is really your reset signal
+        -- generate reset
         rstAsyncIn <= '1';
         wait for 2 * CLK_PERIOD;
         rstAsyncIn <= '0';
         wait for 2 * CLK_PERIOD;
         wait until falling_edge(clkIn);
 
+        -- start sending pixel data
         for frameCount in 0 to 1 loop
             frameValidIn <= '1';
             wait for 2 * CLK_PERIOD;
-
             for y in 0 to IMG_HEIGHT - 1 loop
                 lineValidIn <= '1';
-
                 for x in 0 to IMG_WIDTH - 1 loop
                     wait until falling_edge(clkIn);
 
-                    pixelDataIn(11 downto 4) <= std_logic_vector(to_unsigned(x, 8));
---                    pixelArray(y, x)         <= temp;
+                    pixelDataAcc      := std_logic_vector(to_unsigned(x, pixelDataAcc'length));
+                    pixelDataIn       <= pixelDataAcc;
+                    pixelMatrix(y, x) <= pixelDataAcc;
+
                 end loop;
                 wait until falling_edge(clkIn);
-
                 lineValidIn <= '0';
                 pixelDataIn <= X"000";
-
                 wait for HBLANK_CLKS * CLK_PERIOD;
             end loop;
             frameValidIn <= '0';
@@ -100,48 +108,57 @@ begin
         end loop;
 
         -- Stop the clock and hence terminate the simulation
-        TbSimEnded <= '1';
+        tbSimEnded <= '1';
         wait;
     end process;
 
---    checkProc : process(clkIn, pixelValidOut)
---        variable currColor                       : Pixel_Color := Green1;
---        variable redColor, greenColor, blueColor : Pixel_Data;
---        variable x, y                            : natural     := 0;
---    begin
---        if rising_edge(clkIn) and pixelValidOut then
---            currColor := getCurrColor(currXOut, currYOut);
---            x         := currXOut + 1;
---            y         := currYOut + 1;
---
---            -- demosaicing
---            if currColor = Red then
---                redColor   := pixelArray(y, x);
---                greenColor := (pixelArray(y - 1, x) + pixelArray(y, x - 1) + pixelArray(y, x + 1) + pixelArray(y + 1, x)) / 4;
---                blueColor  := (pixelArray(y - 1, x - 1) + pixelArray(y - 1, x + 1) + pixelArray(y + 1, x - 1) + pixelArray(y + 1, x + 1)) / 4;
---            elsif currColor = Blue then
---                redColor   := (pixelArray(y - 1, x - 1) + pixelArray(y - 1, x + 1) + pixelArray(y + 1, x - 1) + pixelArray(y + 1, x + 1)) / 4;
---                greenColor := (pixelArray(y - 1, x + 1) + pixelArray(y, x - 1) + pixelArray(y, x + 1) + pixelArray(y + 1, x)) / 4;
---                blueColor  := pixelArray(y, x);
---            elsif currColor = Green1 then
---                redColor   := (pixelArray(y, x - 1) + pixelArray(y, x + 1)) / 2;
---                greenColor := pixelArray(y, x);
---                blueColor  := (pixelArray(y - 1, x) + pixelArray(y + 1, x)) / 2;
---            elsif currColor = Green2 then
---                redColor   := (pixelArray(y - 1, x) + pixelArray(y + 1, x)) / 2;
---                greenColor := pixelArray(y, x);
---                blueColor  := (pixelArray(y, x - 1) + pixelArray(y, x + 1)) / 2;
---            end if;
---
---            assert redColor = redOut report "Wrong red color value on output\n(height, width): (" &
---            integer'image(currYOut) & ", " & integer'image(currXOut) & ")\n" severity failure;
---
---            assert greenColor = greenOut report "Wrong green color value on output\n(height, width): (" &
---            integer'image(currYOut) & ", " & integer'image(currXOut) & ")\n" severity failure;
---
---            assert blueColor = blueOut report "Wrong blue color value on output\n(height, width): (" &
---            integer'image(currYOut) & ", " & integer'image(currXOut) & ")\n" severity failure;
---        end if;
---    end process checkProc;
+    checkProc : process(clkIn, pixelValidOut)
+        variable currColor                       : Pixel_Color    := Green1;
+        variable redColor, greenColor, blueColor : Pixel_Data;
+        variable x, y                            : natural        := 0;
+        variable tempPixel                       : Ccd_Pixel_Data := X"000";
+    begin
+        if rising_edge(clkIn) and pixelValidOut then
+            x         := currXOut + 1;
+            y         := currYOut + 1;
+            currColor := getCurrColor(x, y);
 
+            -- demosaicing
+            if currColor = Red then
+                tempPixel := pixelMatrix(y, x);
+                redColor  := unsigned(tempPixel(Pixel_Range));
+
+                greenColor := (matrixToPixel(pixelMatrix(y - 1, x)) + matrixToPixel(pixelMatrix(y, x - 1)) + matrixToPixel(pixelMatrix(y, x + 1)) + matrixToPixel(pixelMatrix(y + 1, x))) / 4;
+                blueColor  := (matrixToPixel(pixelMatrix(y - 1, x - 1)) + matrixToPixel(pixelMatrix(y - 1, x + 1)) + matrixToPixel(pixelMatrix(y + 1, x - 1)) + matrixToPixel(pixelMatrix(y + 1, x + 1))) / 4;
+            elsif currColor = Blue then
+                tempPixel := pixelMatrix(y, x);
+                blueColor := unsigned(tempPixel(Pixel_Range));
+
+                greenColor := (matrixToPixel(pixelMatrix(y - 1, x)) + matrixToPixel(pixelMatrix(y, x - 1)) + matrixToPixel(pixelMatrix(y, x + 1)) + matrixToPixel(pixelMatrix(y + 1, x))) / 4;
+                redColor   := (matrixToPixel(pixelMatrix(y - 1, x - 1)) + matrixToPixel(pixelMatrix(y - 1, x + 1)) + matrixToPixel(pixelMatrix(y + 1, x - 1)) + matrixToPixel(pixelMatrix(y + 1, x + 1))) / 4;
+            elsif currColor = Green1 then
+                tempPixel  := pixelMatrix(y, x);
+                greenColor := unsigned(tempPixel(Pixel_Range));
+
+                redColor  := (matrixToPixel(pixelMatrix(y, x - 1)) + matrixToPixel(pixelMatrix(y, x + 1))) / 2;
+                blueColor := (matrixToPixel(pixelMatrix(y - 1, x)) + matrixToPixel(pixelMatrix(y + 1, x))) / 2;
+            elsif currColor = Green2 then
+                tempPixel  := pixelMatrix(y, x);
+                greenColor := unsigned(tempPixel(Pixel_Range));
+
+                blueColor := (matrixToPixel(pixelMatrix(y, x - 1)) + matrixToPixel(pixelMatrix(y, x + 1))) / 2;
+                redColor  := (matrixToPixel(pixelMatrix(y - 1, x)) + matrixToPixel(pixelMatrix(y + 1, x))) / 2;
+            end if;
+
+            -- computed colors should be equal
+            assert redColor = redOut report "Wrong red color value on output\n(height, width): (" &
+                integer'image(currYOut) & ", " & integer'image(currXOut) & ")\n" severity failure;
+
+            assert greenColor = greenOut report "Wrong green color value on output\n(height, width): (" &
+                integer'image(currYOut) & ", " & integer'image(currXOut) & ")\n" severity failure;
+
+            assert blueColor = blueOut report "Wrong blue color value on output\n(height, width): (" &
+                integer'image(currYOut) & ", " & integer'image(currXOut) & ")\n" severity failure;
+        end if;
+    end process checkProc;
 end test;

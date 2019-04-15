@@ -15,37 +15,40 @@ entity ccd_ctrl is
     );
     alias IMG_WIDTH is IMG_CONSTS.width;
     alias IMG_HEIGHT is IMG_CONSTS.height;
+    alias PIXEL_SIZE is IMG_CONSTS.pixel_data_size;
+    subtype Pixel_Range is natural range PIXEL_SIZE - 1 downto 0;
+    constant PIPELINE_SIZE : natural := PIXEL_SIZE + 2;
+    -- pipeline stage has to be wide enough not to overflow during addition
+    subtype Pipeline_Pixel is unsigned(PIPELINE_SIZE - 1 downto 0);
 end entity ccd_ctrl;
 
 architecture RTL of ccd_ctrl is
     -- pixel shift register OUTPUT
-    signal currPixelMatrix : Pixel_Matrix := (others => (others => X"00"));
+    signal pixelMatrix : Pixel_Matrix := (others => (others => X"00"));
 
     -- shiftProc (exposes all information)
-    signal currPixelValid  : boolean           := true;
-    signal pixelCounter    : Pixel_Count_Range := 0;
-    signal currShiftWidth  : Img_Width_Range   := 0;
-    signal currShiftHeight : Img_Height_Range  := 0;
-    signal hasNewPixel     : boolean           := false;
+    signal currPixelValid : boolean           := true;
+    signal pixelCounter   : Pixel_Count_Range := 0;
+    signal matrixWidth    : Img_Width_Range   := 0; -- width of pixel at the center of matrix
+    signal matrixHeight   : Img_Height_Range  := 0; -- height of pixel at the center of matrix
+    signal hasNewPixel    : boolean           := false;
 
     -- demosaicStage1 (internal)
-    signal currWidth  : Img_Width_Range  := 0;
-    signal currHeight : Img_Height_Range := 0;
+    signal pipelineWidth  : Img_Width_Range  := 0; -- width of pixel in 1st pipeline stage
+    signal pipelineHeight : Img_Height_Range := 0; -- height of pixel in 1st pipeline stage
 
     -- demosaicStage1 (API)
-    signal pipelineWidth              : Img_Width_Range      := 0;
-    signal pipelineHeight             : Img_Height_Range     := 0;
-    signal color11stage, color12stage : unsigned(8 downto 0) := B"0000_0000_0";
-    signal color21stage, color22stage : unsigned(8 downto 0) := B"0000_0000_0";
-    signal color3stage                : Pixel_Data           := B"0000_0000";
-    signal stageColor                 : Pixel_Color          := Green1;
-    signal pipelineReady              : boolean              := false;
-
-    -- demosaicStage2
+    signal outWidth                   : Img_Width_Range  := 0; -- width of pixel at the pipeline output
+    signal outHeight                  : Img_Height_Range := 0; -- height of pixel at the pipeline output
+    signal color11stage, color12stage : Pipeline_Pixel   := B"0000_0000_00";
+    signal color21stage, color22stage : Pipeline_Pixel   := B"0000_0000_00";
+    signal color3stage                : Pixel_Data       := B"0000_0000";
+    signal stageColor                 : Pixel_Color      := Green1;
+    signal pipelineReady              : boolean          := false;
 
     impure function isImageFringe return boolean is
     begin
-        return currShiftHeight = 0 or currShiftHeight = IMG_WIDTH - 1 or currShiftWidth = 0 or currShiftWidth = IMG_WIDTH - 1;
+        return matrixHeight = 0 or matrixHeight = IMG_WIDTH - 1 or matrixWidth = 0 or matrixWidth = IMG_WIDTH - 1;
     end function isImageFringe;
 begin
 
@@ -59,16 +62,16 @@ begin
             -- TODO: parametrize
             dataIn     => unsigned(pixelDataIn(pixelDataIn'high downto 4)),
             enableIn   => currPixelValid,
-            pixelsOut  => currPixelMatrix
+            pixelsOut  => pixelMatrix
         );
 
     shiftProc : process(clkIn, rstAsyncIn)
     begin
         if rstAsyncIn = '1' then
-            currShiftWidth  <= 0;
-            currShiftHeight <= 0;
-            pixelCounter    <= 0;
-            hasNewPixel     <= false;
+            matrixWidth  <= 0;
+            matrixHeight <= 0;
+            pixelCounter <= 0;
+            hasNewPixel  <= false;
         elsif rising_edge(clkIn) then
 
             -- counter logic
@@ -80,20 +83,20 @@ begin
 
                 -- current width & height of pixel in shift register
                 if pixelCounter > IMG_WIDTH + 1 then
-                    if currShiftWidth >= IMG_WIDTH - 1 then
-                        currShiftWidth  <= 0;
-                        currShiftHeight <= currShiftHeight + 1;
+                    if matrixWidth >= IMG_WIDTH - 1 then
+                        matrixWidth  <= 0;
+                        matrixHeight <= matrixHeight + 1;
                     else
-                        currShiftWidth <= currShiftWidth + 1;
+                        matrixWidth <= matrixWidth + 1;
                     end if;
                 end if;
 
             elsif frameValidIn = '0' and lineValidIn = '0' then
                 -- reset counters on start of new frame
-                pixelCounter    <= 0;
-                currShiftWidth  <= 0;
-                currShiftHeight <= 0;
-                hasNewPixel     <= false;
+                pixelCounter <= 0;
+                matrixWidth  <= 0;
+                matrixHeight <= 0;
+                hasNewPixel  <= false;
             else
                 hasNewPixel <= false;
             end if;
@@ -102,72 +105,72 @@ begin
     end process shiftProc;
 
     demosaicStage1 : process(clkIn, rstAsyncIn)
-        variable currColor : Pixel_Color := getCurrColor(currShiftWidth, currShiftHeight);
+        variable currColor : Pixel_Color := getCurrColor(matrixWidth, matrixHeight);
     begin
         if rstAsyncIn = '1' then
-            currWidth  <= 0;
-            currHeight <= 0;
+            pipelineWidth  <= 0;
+            pipelineHeight <= 0;
         elsif rising_edge(clkIn) then
-            pipelineWidth  <= currWidth;
-            pipelineHeight <= currHeight;
-            pipelineReady  <= hasNewPixel and not isImageFringe;
-            currColor      := getCurrColor(currShiftWidth, currShiftHeight);
+            outWidth      <= pipelineWidth;
+            outHeight     <= pipelineHeight;
+            pipelineReady <= hasNewPixel and not isImageFringe;
+            currColor     := getCurrColor(matrixWidth, matrixHeight);
 
             -- ignore image fringes
             if not isImageFringe then
                 if hasNewPixel then
-                    if currWidth >= IMG_WIDTH - 3 then
-                        currWidth  <= 0;
-                        currHeight <= currHeight + 1;
+                    if pipelineWidth >= IMG_WIDTH - 3 then
+                        pipelineWidth  <= 0;
+                        pipelineHeight <= pipelineHeight + 1;
                     -- ugly hack, but what can you do :)
-                    elsif currShiftHeight = 1 and currShiftWidth = 1 then
-                        currWidth <= 0;
+                    elsif matrixHeight = 1 and matrixWidth = 1 then
+                        pipelineWidth <= 0;
                     else
-                        currWidth <= currWidth + 1;
+                        pipelineWidth <= pipelineWidth + 1;
                     end if;
                 end if;
             elsif pixelCounter = 0 then
-                currHeight <= 0;
-                currWidth  <= 0;
+                pipelineHeight <= 0;
+                pipelineWidth  <= 0;
             end if;
 
             -- demosaicing (first pipeline stage)
             if currColor = Red then
                 stageColor   <= Red;
                 -- red
-                color3stage  <= currPixelMatrix(1, 1);
+                color3stage  <= pixelMatrix(1, 1);
                 -- green
-                color11stage <= widen(currPixelMatrix(0, 1)) + widen(currPixelMatrix(1, 0));
-                color12stage <= widen(currPixelMatrix(1, 2)) + widen(currPixelMatrix(2, 1));
+                color11stage <= resize(pixelMatrix(0, 1), PIPELINE_SIZE) + resize(pixelMatrix(1, 0), PIPELINE_SIZE);
+                color12stage <= resize(pixelMatrix(1, 2), PIPELINE_SIZE) + resize(pixelMatrix(2, 1), PIPELINE_SIZE);
                 -- blue
-                color21stage <= widen(currPixelMatrix(0, 0)) + widen(currPixelMatrix(0, 2));
-                color22stage <= widen(currPixelMatrix(2, 0)) + widen(currPixelMatrix(2, 2));
+                color21stage <= resize(pixelMatrix(0, 0), PIPELINE_SIZE) + resize(pixelMatrix(0, 2), PIPELINE_SIZE);
+                color22stage <= resize(pixelMatrix(2, 0), PIPELINE_SIZE) + resize(pixelMatrix(2, 2), PIPELINE_SIZE);
             elsif currColor = Blue then
                 stageColor   <= Blue;
                 -- blue
-                color3stage  <= currPixelMatrix(1, 1);
+                color3stage  <= pixelMatrix(1, 1);
                 -- green
-                color11stage <= widen(currPixelMatrix(0, 1)) + widen(currPixelMatrix(1, 0));
-                color12stage <= widen(currPixelMatrix(1, 2)) + widen(currPixelMatrix(2, 1));
+                color11stage <= resize(pixelMatrix(0, 1), PIPELINE_SIZE) + resize(pixelMatrix(1, 0), PIPELINE_SIZE);
+                color12stage <= resize(pixelMatrix(1, 2), PIPELINE_SIZE) + resize(pixelMatrix(2, 1), PIPELINE_SIZE);
                 -- red
-                color21stage <= widen(currPixelMatrix(0, 0)) + widen(currPixelMatrix(0, 2));
-                color22stage <= widen(currPixelMatrix(2, 0)) + widen(currPixelMatrix(2, 2));
+                color21stage <= resize(pixelMatrix(0, 0), PIPELINE_SIZE) + resize(pixelMatrix(0, 2), PIPELINE_SIZE);
+                color22stage <= resize(pixelMatrix(2, 0), PIPELINE_SIZE) + resize(pixelMatrix(2, 2), PIPELINE_SIZE);
             elsif currColor = Green1 then
                 stageColor   <= Green1;
                 -- green
-                color3stage  <= currPixelMatrix(1, 1);
+                color3stage  <= pixelMatrix(1, 1);
                 -- red
-                color11stage <= widen(currPixelMatrix(1, 0)) + widen(currPixelMatrix(1, 2));
+                color11stage <= resize(pixelMatrix(1, 0), PIPELINE_SIZE) + resize(pixelMatrix(1, 2), PIPELINE_SIZE);
                 -- blue
-                color21stage <= widen(currPixelMatrix(0, 1)) + widen(currPixelMatrix(2, 1));
+                color21stage <= resize(pixelMatrix(0, 1), PIPELINE_SIZE) + resize(pixelMatrix(2, 1), PIPELINE_SIZE);
             elsif currColor = Green2 then
                 stageColor   <= Green2;
                 -- green
-                color3stage  <= currPixelMatrix(1, 1);
+                color3stage  <= pixelMatrix(1, 1);
                 -- blue
-                color11stage <= widen(currPixelMatrix(1, 0)) + widen(currPixelMatrix(1, 2));
+                color11stage <= resize(pixelMatrix(1, 0), PIPELINE_SIZE) + resize(pixelMatrix(1, 2), PIPELINE_SIZE);
                 -- red
-                color21stage <= widen(currPixelMatrix(0, 1)) + widen(currPixelMatrix(2, 1));
+                color21stage <= resize(pixelMatrix(0, 1), PIPELINE_SIZE) + resize(pixelMatrix(2, 1), PIPELINE_SIZE);
             else
                 report "this should not happen" severity failure;
             end if;
@@ -176,7 +179,7 @@ begin
     end process demosaicStage1;
 
     demosaicStage2 : process(clkIn, rstAsyncIn)
-        variable pipelineAcc : unsigned(9 downto 0) := B"0000_0000_00";
+        variable pipelineAcc : Pipeline_Pixel := B"0000_0000_00";
     begin
         if rstAsyncIn = '1' then
             redOut        <= X"00";
@@ -188,43 +191,43 @@ begin
 
             if pipelineReady then
                 if stageColor = Red then
-                    redOut <= color3stage(7 downto 0);
+                    redOut <= color3stage;
 
-                    pipelineAcc := ((widen(color11stage) + widen(color12stage)) / 4);
-                    greenOut    <= pipelineAcc(7 downto 0);
+                    pipelineAcc := (color11stage + color12stage) / 4;
+                    greenOut    <= pipelineAcc(Pixel_Range);
 
-                    pipelineAcc := ((widen(color21stage) + widen(color22stage)) / 4);
-                    blueOut     <= pipelineAcc(7 downto 0);
+                    pipelineAcc := (color21stage + color22stage) / 4;
+                    blueOut     <= pipelineAcc(Pixel_Range);
                 elsif stageColor = Blue then
-                    blueOut <= color3stage(7 downto 0);
+                    blueOut <= color3stage;
 
-                    pipelineAcc := ((widen(color11stage) + widen(color12stage)) / 4);
-                    greenOut    <= pipelineAcc(7 downto 0);
+                    pipelineAcc := (color11stage + color12stage) / 4;
+                    greenOut    <= pipelineAcc(Pixel_Range);
 
-                    pipelineAcc := ((widen(color21stage) + widen(color22stage)) / 4);
-                    redOut      <= pipelineAcc(7 downto 0);
+                    pipelineAcc := (color21stage + color22stage) / 4;
+                    redOut      <= pipelineAcc(Pixel_Range);
                 elsif stageColor = Green1 then
-                    greenOut <= color3stage(7 downto 0);
+                    greenOut <= color3stage;
 
-                    pipelineAcc := widen(color11stage) / 2;
-                    redOut      <= pipelineAcc(7 downto 0);
+                    pipelineAcc := color11stage / 2;
+                    redOut      <= pipelineAcc(Pixel_Range);
 
-                    pipelineAcc := widen(color21stage) / 2;
-                    blueOut     <= pipelineAcc(7 downto 0);
+                    pipelineAcc := color21stage / 2;
+                    blueOut     <= pipelineAcc(Pixel_Range);
                 elsif stageColor = Green2 then
-                    greenOut <= color3stage(7 downto 0);
+                    greenOut <= color3stage;
 
-                    pipelineAcc := widen(color11stage) / 2;
-                    blueOut     <= pipelineAcc(7 downto 0);
+                    pipelineAcc := color11stage / 2;
+                    blueOut     <= pipelineAcc(Pixel_Range);
 
-                    pipelineAcc := widen(color21stage) / 2;
-                    redOut      <= pipelineAcc(7 downto 0);
+                    pipelineAcc := color21stage / 2;
+                    redOut      <= pipelineAcc(Pixel_Range);
                 end if;
             end if;
         end if;
     end process demosaicStage2;
 
-    currXOut <= pipelineWidth;
-    currYOut <= pipelineHeight;
+    currXOut <= outWidth;
+    currYOut <= outHeight;
 
 end architecture RTL;

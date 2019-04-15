@@ -117,8 +117,6 @@ package ccd_pkg is
     -- 9b signed kernel convolution constants
     type Kernel_Params_Arr is array (((KERNEL_PARAMS.dim**2) - 1) downto 0) of Kernel_Const_Data_Range;
 
-    pure function widen(val : signed) return signed;
-    pure function widen(val : unsigned) return unsigned;
     pure function toSaturatedUnsigned(val : signed; outLen : natural) return unsigned;
     pure function getCurrColor(currWidth : Img_Width_Range; currHeight : Img_Height_Range) return Pixel_Color;
 end package ccd_pkg;
@@ -161,18 +159,6 @@ package body ccd_pkg is
     begin
         return currColorAbsolute(absoluteWidth, absoluteHeight, IMG_CONSTS.is_mirrored);
     end function getCurrColor;
-
-    pure function widen(val : signed)
-    return signed is
-    begin
-        return resize(val, val'length + 1);
-    end function widen;
-
-    pure function widen(val : unsigned)
-    return unsigned is
-    begin
-        return resize(val, val'length + 1);
-    end function widen;
 
     pure function toSaturatedUnsigned(val : signed; outLen : natural)
     return unsigned is
