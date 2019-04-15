@@ -13,7 +13,7 @@ entity ccd_ctrl_tb is
     alias IMG_WIDTH is IMG_CONSTS.width;
     alias IMG_HEIGHT is IMG_CONSTS.height;
 
-    type Ccd_Image_Acc is array (0 to IMG_HEIGHT - 1, 0 to IMG_WIDTH - 1) of Ccd_Pixel_Data;
+    type Ccd_Image_Acc is array (0 to IMG_HEIGHT - 1, 0 to IMG_WIDTH - 1) of Pixel_Data;
 
     constant CLK_PERIOD : time := 20 ns; -- EDIT Put right period here
 
@@ -62,8 +62,6 @@ begin
     clkIn <= TbClock;
 
     stimuli : process
-        variable pixelArray : Ccd_Image_Acc := (others => (others => X"000"));
-        variable temp : std_logic_vector(7 downto 0) := X"00";
     begin
         frameValidIn <= '0';
         lineValidIn  <= '0';
@@ -87,8 +85,8 @@ begin
                 for x in 0 to IMG_WIDTH - 1 loop
                     wait until falling_edge(clkIn);
 
-                    temp := std_logic_vector(to_unsigned(x, temp'length));
-                    pixelDataIn(11 downto 4) <= temp;
+                    pixelDataIn(11 downto 4) <= std_logic_vector(to_unsigned(x, 8));
+--                    pixelArray(y, x)         <= temp;
                 end loop;
                 wait until falling_edge(clkIn);
 
@@ -105,5 +103,45 @@ begin
         TbSimEnded <= '1';
         wait;
     end process;
+
+--    checkProc : process(clkIn, pixelValidOut)
+--        variable currColor                       : Pixel_Color := Green1;
+--        variable redColor, greenColor, blueColor : Pixel_Data;
+--        variable x, y                            : natural     := 0;
+--    begin
+--        if rising_edge(clkIn) and pixelValidOut then
+--            currColor := getCurrColor(currXOut, currYOut);
+--            x         := currXOut + 1;
+--            y         := currYOut + 1;
+--
+--            -- demosaicing
+--            if currColor = Red then
+--                redColor   := pixelArray(y, x);
+--                greenColor := (pixelArray(y - 1, x) + pixelArray(y, x - 1) + pixelArray(y, x + 1) + pixelArray(y + 1, x)) / 4;
+--                blueColor  := (pixelArray(y - 1, x - 1) + pixelArray(y - 1, x + 1) + pixelArray(y + 1, x - 1) + pixelArray(y + 1, x + 1)) / 4;
+--            elsif currColor = Blue then
+--                redColor   := (pixelArray(y - 1, x - 1) + pixelArray(y - 1, x + 1) + pixelArray(y + 1, x - 1) + pixelArray(y + 1, x + 1)) / 4;
+--                greenColor := (pixelArray(y - 1, x + 1) + pixelArray(y, x - 1) + pixelArray(y, x + 1) + pixelArray(y + 1, x)) / 4;
+--                blueColor  := pixelArray(y, x);
+--            elsif currColor = Green1 then
+--                redColor   := (pixelArray(y, x - 1) + pixelArray(y, x + 1)) / 2;
+--                greenColor := pixelArray(y, x);
+--                blueColor  := (pixelArray(y - 1, x) + pixelArray(y + 1, x)) / 2;
+--            elsif currColor = Green2 then
+--                redColor   := (pixelArray(y - 1, x) + pixelArray(y + 1, x)) / 2;
+--                greenColor := pixelArray(y, x);
+--                blueColor  := (pixelArray(y, x - 1) + pixelArray(y, x + 1)) / 2;
+--            end if;
+--
+--            assert redColor = redOut report "Wrong red color value on output\n(height, width): (" &
+--            integer'image(currYOut) & ", " & integer'image(currXOut) & ")\n" severity failure;
+--
+--            assert greenColor = greenOut report "Wrong green color value on output\n(height, width): (" &
+--            integer'image(currYOut) & ", " & integer'image(currXOut) & ")\n" severity failure;
+--
+--            assert blueColor = blueOut report "Wrong blue color value on output\n(height, width): (" &
+--            integer'image(currYOut) & ", " & integer'image(currXOut) & ")\n" severity failure;
+--        end if;
+--    end process checkProc;
 
 end test;
