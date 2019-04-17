@@ -20,79 +20,98 @@ entity i2c_ctrl is
 end entity i2c_ctrl;
 
 architecture behavioral of i2c_ctrl is
-    signal fsmState      : FSM_State                                 := Ready;
-    signal ackState      : ACK_State                                 := WaitForAck;
+    signal fsmState      : FSM_State            := Ready;
     -- data/addr array pointer
-    signal bitIndex      : natural range FULL_WIDTH - 1 downto 0     := FULL_WIDTH - 1;
-    signal byteCounter   : natural range 7 downto 0                  := 7;
-    signal dataAggregate : std_logic_vector(FULL_WIDTH - 1 downto 0) := X"00000000";
-    signal clkState      : std_logic                                 := '1';
+    signal currBit       : Data_Aggregate_Range := AGGREGATE_WIDTH - 1;
+    signal dataAggregate : I2c_Aggregate        := X"00_00_00_00";
+    signal clkState      : std_logic            := '1';
+    signal retry         : boolean              := false;
 begin
     controlProc : process(clkIn, rstAsyncIn)
         variable dataOut : std_logic := '1';
     begin
         if rstAsyncIn = '1' then
-            dataAggregate <= X"00000000";
+            dataAggregate <= X"00_00_00_00";
             fsmState      <= Ready;
-            ackState      <= WaitForAck;
-            bitIndex      <= ADDR_WIDTH - 1;
-            byteCounter   <= 7;
+            currBit       <= AGGREGATE_WIDTH - 1;
             doneOut       <= false;
-            -- i2c is idle if SDA = SCL = '1'
+            retry         <= false;
+            -- i2c idle state (data + clk both HIGH)
             clkState      <= '1';
             dataOut       := '1';
         elsif rising_edge(clkIn) then
             case fsmState is
                 when Ready =>
-                    if enableIn then
+                    doneOut <= false;
+                    currBit <= AGGREGATE_WIDTH - 1;
+                    retry   <= false;
+                    if enableIn or retry then
                         dataAggregate <= devAddrIn & dataAddrIn & dataIn;
                         fsmState      <= SendData;
-                        bitIndex      <= ADDR_WIDTH - 1;
-                        ackState      <= WaitForAck;
-                        byteCounter   <= 7;
                         -- initiate with a start bit (pull SDA low while clock is high)
+                        clkState      <= '1';
                         dataOut       := '0';
                     end if;
 
                 when SendData =>
-                    dataOut := dataAggregate(bitIndex);
-                    if bitIndex > 0 then
-                        bitIndex <= bitIndex - 1;
+                    clkState <= not clkState;
+
+                    -- data can only update while clock is low
+                    -- because data are latched they update on next clock cycle (HIGH -> LOW)
+                    if clkState = '1' then
+                        dataOut := dataAggregate(currBit);
+                        currBit <= currBit - 1;
+
+                        if currBit = 24 or currBit = 16 or currBit = 8 or currBit = 0 then
+                            fsmState <= ReleaseLine;
+                        end if;
                     end if;
 
-                    if byteCounter > 0 then
-                        byteCounter <= byteCounter - 1;
-                    elsif byteCounter = 0 then
-                        if ackState = WaitForAck then
-                            ackState <= ReleaseLine;
-                        elsif ackState = ReleaseLine then
-                            dataOut  := '1';
-                            ackState <= ReadAck;
-                        elsif ackState = ReadAck then
-                            if bitIndex = 0 and sDataIO = '0' then
+                when ReleaseLine =>
+                    clkState <= not clkState;
+
+                    if clkState = '1' then
+                        -- release SDA
+                        dataOut  := '1';
+                        fsmState <= WaitForAck;
+                    end if;
+
+                when WaitForAck =>
+                    clkState <= not clkState;
+
+                    if clkState = '1' then
+                        if sDataIO = '0' then
+                            if currBit = 0 then
                                 dataOut  := '0';
                                 fsmState <= SendStop;
-                            elsif byteCounter = 0 and sDataIO = '0' then
-                                ackState    <= WaitForAck;
-                                byteCounter <= 7;
                             else
-                                -- TODO: implement error recovery
-                                fsmState <= Ready;
+                                -- we have to change data in this clock cycle
+                                dataOut  := dataAggregate(currBit);
+                                currBit  <= currBit - 1;
+                                fsmState <= SendData;
                             end if;
+                        else
+                            report "slave didn't acknowledge data" severity failure;
+                            fsmState <= Ready;
+                            retry    <= true;
                         end if;
                     end if;
 
                 when SendStop =>
-                    dataOut  := '1';
-                    fsmState <= Ready;
-                    doneOut  <= true;
+                    clkState <= '1';
+
+                    if clkState = '1' then
+                        dataOut  := '1';
+                        fsmState <= Ready;
+                        doneOut  <= true;
+                    end if;
             end case;
+
+            -- i2c data conversion
+            sDataIO <= logicToI2CBusState(dataOut);
         end if;
-
-        -- i2c communication
-        sDataIO <= logicToI2CBusState(dataOut);
-        sClkOut <= clkState;
-
     end process controlProc;
+
+    sClkOut <= clkState;
 end architecture behavioral;
 
