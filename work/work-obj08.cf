@@ -1,31 +1,31 @@
 v 4
-file "/home/lavaLamp/Documents/git/de20-camera/" "src/common_pkgs/i2c_pkg.vhd" "e4b4676df561d634ecb1acfed74931003f70ed9d" "20190417002322.521":
-  package i2c_pkg at 1( 0) + 0 on 11 body;
-  package body i2c_pkg at 29( 1149) + 0 on 12;
-file "/home/lavaLamp/Documents/git/de20-camera/" "src/common_pkgs/ccd_pkg.vhd" "5d31ab40765801835115e741894465202157f7b1" "20190417002240.178":
-  package ccd_pkg at 1( 0) + 0 on 4;
-  package body ccd_pkg at 126( 5515) + 0 on 4;
-file "/home/lavaLamp/Documents/git/de20-camera/" "src/reset_ctrl.vhd" "165773d7dab717c98d4effe915005fdc65860320" "20190417002246.867":
-  entity reset_ctrl at 1( 0) + 0 on 4;
-  architecture rtl of reset_ctrl at 18( 440) + 0 on 4;
-file "/home/lavaLamp/Documents/git/de20-camera/" "src/pixel_shiftreg.vhd" "4bc07d08df9743dc4a47b6a89559b072860b172d" "20190417002246.867":
-  entity pixel_shiftreg at 1( 0) + 0 on 4;
-  architecture rtl of pixel_shiftreg at 18( 469) + 0 on 4;
-file "/home/lavaLamp/Documents/git/de20-camera/" "src/i2c_ctrl.vhd" "5d3816b1614258d275ebc88f83ce97e804af0fff" "20190417002322.521":
-  entity i2c_ctrl at 1( 0) + 0 on 13;
-  architecture behavioral of i2c_ctrl at 22( 828) + 0 on 14;
-file "/home/lavaLamp/Documents/git/de20-camera/" "src/i2c_ccd_config.vhd" "74aa654ab057f5e9c34195cd9de35dbdf65b7ad1" "20190417002246.867":
-  entity i2c_ccd_config at 1( 0) + 0 on 4;
-  architecture rtl of i2c_ccd_config at 25( 932) + 0 on 4;
-file "/home/lavaLamp/Documents/git/de20-camera/" "src/color_kernel.vhd" "ed6990ed1cb379d213d1fc6c745b1c3eb399a864" "20190417002246.867":
-  entity color_kernel at 1( 0) + 0 on 4;
-  architecture rtl of color_kernel at 34( 1050) + 0 on 4;
-file "/home/lavaLamp/Documents/git/de20-camera/" "src/ccd_ctrl.vhd" "905ab7298b3ea2df56a966634057302111fd5a25" "20190417002246.866":
-  entity ccd_ctrl at 1( 0) + 0 on 4;
-  architecture rtl of ccd_ctrl at 20( 626) + 0 on 4;
+file "/home/lavaLamp/Documents/git/de20-camera/" "tb/i2c_ctrl_tb.vhd" "4890acf5dc36e2491b6aa6daddc618f4ba245a23" "20190417005838.681":
+  entity tb_i2c_ctrl at 1( 0) + 0 on 33;
+  architecture tb of tb_i2c_ctrl at 12( 257) + 0 on 34;
 file "/home/lavaLamp/Documents/git/de20-camera/" "tb/ccd_ctrl_tb.vhd" "e76dbf94d0763651dfacd491d751e2d255cf08ae" "20190417002252.514":
   entity ccd_ctrl_tb at 5( 118) + 0 on 4;
   architecture test of ccd_ctrl_tb at 26( 693) + 0 on 4;
-file "/home/lavaLamp/Documents/git/de20-camera/" "tb/i2c_ctrl_tb.vhd" "c52c87c9d3f6a0b767259c3a74651667c076bac8" "20190417002322.521":
-  entity tb_i2c_ctrl at 1( 0) + 0 on 15;
-  architecture tb of tb_i2c_ctrl at 12( 257) + 0 on 16;
+file "/home/lavaLamp/Documents/git/de20-camera/" "src/ccd_ctrl.vhd" "905ab7298b3ea2df56a966634057302111fd5a25" "20190417002246.866":
+  entity ccd_ctrl at 1( 0) + 0 on 4;
+  architecture rtl of ccd_ctrl at 20( 626) + 0 on 4;
+file "/home/lavaLamp/Documents/git/de20-camera/" "src/color_kernel.vhd" "ed6990ed1cb379d213d1fc6c745b1c3eb399a864" "20190417002246.867":
+  entity color_kernel at 1( 0) + 0 on 4;
+  architecture rtl of color_kernel at 34( 1050) + 0 on 4;
+file "/home/lavaLamp/Documents/git/de20-camera/" "src/i2c_ccd_config.vhd" "74aa654ab057f5e9c34195cd9de35dbdf65b7ad1" "20190417002246.867":
+  entity i2c_ccd_config at 1( 0) + 0 on 4;
+  architecture rtl of i2c_ccd_config at 25( 932) + 0 on 4;
+file "/home/lavaLamp/Documents/git/de20-camera/" "src/i2c_ctrl.vhd" "5d3816b1614258d275ebc88f83ce97e804af0fff" "20190417002322.521":
+  entity i2c_ctrl at 1( 0) + 0 on 13;
+  architecture behavioral of i2c_ctrl at 22( 828) + 0 on 14;
+file "/home/lavaLamp/Documents/git/de20-camera/" "src/pixel_shiftreg.vhd" "4bc07d08df9743dc4a47b6a89559b072860b172d" "20190417002246.867":
+  entity pixel_shiftreg at 1( 0) + 0 on 4;
+  architecture rtl of pixel_shiftreg at 18( 469) + 0 on 4;
+file "/home/lavaLamp/Documents/git/de20-camera/" "src/reset_ctrl.vhd" "6fcefc3fab99439834622e72fa95e6f9aa87b0d3" "20190417003949.702":
+  entity reset_ctrl at 1( 0) + 0 on 4;
+  architecture rtl of reset_ctrl at 16( 347) + 0 on 4;
+file "/home/lavaLamp/Documents/git/de20-camera/" "src/common_pkgs/ccd_pkg.vhd" "5d31ab40765801835115e741894465202157f7b1" "20190417002240.178":
+  package ccd_pkg at 1( 0) + 0 on 4;
+  package body ccd_pkg at 126( 5515) + 0 on 4;
+file "/home/lavaLamp/Documents/git/de20-camera/" "src/common_pkgs/i2c_pkg.vhd" "e4b4676df561d634ecb1acfed74931003f70ed9d" "20190417002322.521":
+  package i2c_pkg at 1( 0) + 0 on 11 body;
+  package body i2c_pkg at 29( 1149) + 0 on 12;

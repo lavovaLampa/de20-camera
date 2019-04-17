@@ -19,7 +19,7 @@ architecture tb of tb_i2c_ctrl is
     signal dataAddrIn : i2c_addr  := X"00";
     signal doneOut    : boolean;
     signal sClkOut    : std_logic;
-    signal sDataIO    : std_logic;
+    signal sDataIO    : std_logic := 'Z';
 
     signal tbClock    : std_logic := '0';
     signal tbSimEnded : std_logic := '0';
@@ -57,13 +57,13 @@ begin
         wait for 2 * CLK_PERIOD;
         rstAsyncIn <= '0';
         wait for 2 * CLK_PERIOD;
-        
-        devAddrIn <= CCD_WRITE_ADDR;
+
+        devAddrIn  <= CCD_WRITE_ADDR;
         dataAddrIn <= X"03";
-        dataIn <= X"00FF";
-        enableIn <= true;
+        dataIn     <= X"00FF";
+        enableIn   <= true;
         wait until rising_edge(clkIn);
-        
+
         wait until doneOut = true;
         -- Stop the clock and hence terminate the simulation
         tbSimEnded <= '1';
@@ -84,44 +84,44 @@ begin
             bitPointer := AGGREGATE_WIDTH - 1;
             dataOut    := '1';
             dataInAcc  := X"00000000";
-        end if;
+        else
+            case state is
+                when Idle =>
+                    -- if START bit received
+                    -- HIGH to LOW transition on DATA line while CLK is HIGH
+                    if sClkOut = '1' and (not sClkOut'event) and sDataIO'event and sDataIO'last_value = 'Z' and sDataIO = '0' then
+                        state := Receive;
+                    end if;
 
-        case state is
-            when Idle =>
-                -- if START bit received
-                -- HIGH to LOW transition on DATA line while CLK is HIGH
-                if sClkOut = '1' and not sClkOut'event and sDataIO'event and sDataIO = '0' then
-                    state := Receive;
-                end if;
-            when Receive =>
-                if rising_edge(sClkOut) then
-                    currBit    := i2cBusStateToLogic(sDataIO);
-                    -- FIXME: will underflow
-                    bitPointer := bitPointer - 1;
-                    -- release line
-                    dataOut    := '1';
-                end if;
+                when Receive =>
+                    if rising_edge(sClkOut) then
+                        currBit    := i2cBusStateToLogic(sDataIO);
+                        report "Received bit (num): " & natural'image(bitPointer) & "\nValue: " & std_logic'image(currBit);
+                        -- FIXME: will underflow
+                        bitPointer := bitPointer - 1;
+                        -- release line
+                        dataOut    := '1';
+                    end if;
 
-                if falling_edge(sClkOut) then
-                    if bitPointer mod 8 = 0 then
+                    if falling_edge(sClkOut) and bitPointer mod 8 = 0 then
                         -- acknowledge byte received
                         dataOut := '0';
                     end if;
-                end if;
 
-                -- if STOP bit received
-                -- LOW to HIGH transition on DATA line while CLK is HIGH
-                if sClkOut = '1' and not sClkOut'event and sDataIO'event and sDataIO = 'Z' then
-                    state := Idle;
-                    assert bitPointer = 0 severity failure;
-                end if;
-        end case;
+                    -- if STOP bit received
+                    -- LOW to HIGH transition on DATA line while CLK is HIGH
+                    if sClkOut = '1' and (not sClkOut'event) and sDataIO'event and sDataIO'last_value = '0' and sDataIO = 'Z' then
+                        state := Idle;
+                        assert bitPointer = 0 severity warning;
+                    end if;
+            end case;
+        end if;
 
         sDataIO <= logicToI2CBusState(dataOut);
 
     end process mockSlave;
 
     -- SDA cannot get to high state
-    assert sDataIO = 'Z' or sDataIO = '0';
+    assert sDataIO = 'Z' or sDataIO = '0' severity failure;
 
 end tb;
