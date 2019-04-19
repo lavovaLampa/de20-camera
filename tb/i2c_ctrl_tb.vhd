@@ -3,10 +3,18 @@ use ieee.std_logic_1164.all;
 use work.i2c_pkg.all;
 use work.i2c_ctrl;
 
+library vunit_lib;
+
 entity tb_i2c_ctrl is
+    generic(runner_cfg : string);
+
     constant I2C_PERIOD : time := 10 us;
     -- clock has to be 2 times i2c clock
     constant CLK_PERIOD : time := 2 * I2C_PERIOD;
+
+    constant TEST_DATA     : I2c_Data := X"00FF";
+    constant TEST_DEV_ADDR : I2c_Addr := CCD_WRITE_ADDR;
+    constant TEST_REG_ADDR : I2c_Addr := X"03";
 end tb_i2c_ctrl;
 
 architecture tb of tb_i2c_ctrl is
@@ -45,6 +53,8 @@ begin
 
     stimuli : process
     begin
+        test_runner_setup(runner, runner_cfg);
+
         -- EDIT Adapt initialization as needed
         enableIn   <= false;
         dataIn     <= X"0000";
@@ -58,63 +68,81 @@ begin
         rstAsyncIn <= '0';
         wait for 2 * CLK_PERIOD;
 
-        devAddrIn  <= CCD_WRITE_ADDR;
-        dataAddrIn <= X"03";
-        dataIn     <= X"00FF";
+        devAddrIn  <= TEST_DEV_ADDR;
+        dataAddrIn <= TEST_REG_ADDR;
+        dataIn     <= TEST_DATA;
         enableIn   <= true;
         wait until rising_edge(clkIn);
 
         wait until doneOut = true;
+        test_runner_cleanup(runner);    -- Simulation ends here
         -- Stop the clock and hence terminate the simulation
         tbSimEnded <= '1';
         wait;
     end process;
 
     mockSlave : process(sClkOut, sDataIO, rstAsyncIn)
-        type Slave_State is (Idle, Receive);
+        type Slave_State is (AwaitStart, Receive, Acknowledge, AwaitStop);
 
-        variable dataInAcc  : I2c_Aggregate        := X"00000000";
-        variable state      : Slave_State          := Idle;
-        variable bitPointer : Data_Aggregate_Range := AGGREGATE_WIDTH - 1;
-        variable dataOut    : std_logic            := '1';
-        variable currBit    : std_logic            := '0';
+        variable dataInAcc              : I2c_Aggregate        := X"00000000";
+        variable state                  : Slave_State          := AwaitStart;
+        variable bitPointer             : Data_Aggregate_Range := AGGREGATE_WIDTH - 1;
+        variable dataOut                : std_logic            := '1';
+        variable currBit                : std_logic            := '0';
+        variable tmpDevAddr, tmpRegAddr : I2c_Addr             := X"00";
+        variable tmpData                : I2c_Data             := X"0000";
     begin
         if rstAsyncIn = '1' then
-            state      := Idle;
+            state      := AwaitStart;
             bitPointer := AGGREGATE_WIDTH - 1;
             dataOut    := '1';
             dataInAcc  := X"00000000";
-        else
+        elsif rising_edge(sClkOut) then
             case state is
-                when Idle =>
-                    -- if START bit received
-                    -- HIGH to LOW transition on DATA line while CLK is HIGH
-                    if sClkOut = '1' and (not sClkOut'event) and sDataIO'event and sDataIO'last_value = 'Z' and sDataIO = '0' then
-                        state := Receive;
-                    end if;
-
                 when Receive =>
-                    if rising_edge(sClkOut) then
-                        currBit    := i2cBusStateToLogic(sDataIO);
-                        report "Received bit (num): " & natural'image(bitPointer) & "\nValue: " & std_logic'image(currBit);
-                        -- FIXME: will underflow
+                    currBit := i2cBusStateToLogic(sDataIO);
+                    report "Received bit (index): " & natural'image(bitPointer) & " -> Value: " & std_logic'image(currBit);
+                    -- release line
+                    dataOut := '1';
+
+                    if bitPointer mod 8 = 0 then
+                        state := Acknowledge;
+                    else
                         bitPointer := bitPointer - 1;
-                        -- release line
-                        dataOut    := '1';
                     end if;
 
-                    if falling_edge(sClkOut) and bitPointer mod 8 = 0 then
-                        -- acknowledge byte received
-                        dataOut := '0';
+                when Acknowledge =>
+                    report "byte acknowledged" severity note;
+                    state   := Receive;
+                    dataOut := '0';
+                    if bitPointer > 0 then
+                        bitPointer := bitPointer - 1;
+                    else
+                        state := AwaitStop;
                     end if;
 
-                    -- if STOP bit received
-                    -- LOW to HIGH transition on DATA line while CLK is HIGH
-                    if sClkOut = '1' and (not sClkOut'event) and sDataIO'event and sDataIO'last_value = '0' and sDataIO = 'Z' then
-                        state := Idle;
-                        assert bitPointer = 0 severity warning;
-                    end if;
+                when others =>
+                    null;
             end case;
+
+        -- if START bit received
+        -- HIGH to LOW transition on DATA line while CLK is HIGH
+        elsif sClkOut = '1' and (not sClkOut'event) and sDataIO'event and sDataIO'last_value = 'Z' and sDataIO = '0' and state = AwaitStart then
+            report "received start bit" severity note;
+            state := Receive;
+
+        -- if STOP bit received
+        -- LOW to HIGH transition on DATA line while CLK is HIGH
+        elsif sClkOut = '1' and (not sClkOut'event) and sDataIO'event and sDataIO'last_value = 'Z' and sDataIO = '0' and state = AwaitStop and bitPointer = 0 then
+            report "received stop bit" severity note;
+            state      := AwaitStart;
+            tmpDevAddr := dataInAcc(31 downto 24);
+            tmpRegAddr := dataInAcc(23 downto 16);
+            tmpData    := dataInAcc(DATA_WIDTH - 1 downto 0);
+
+            assert tmpDevAddr = TEST_DEV_ADDR report "Device address" & LF & "Expected: " & LF & "Received: " severity failure;
+            assert tmpRegAddr = TEST_REG_ADDR report "received register address is not equal" severity failure;
+            assert tmpData = TEST_DATA report "received data is not equal" severity failure;
         end if;
 
         sDataIO <= logicToI2CBusState(dataOut);

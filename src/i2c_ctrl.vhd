@@ -60,9 +60,12 @@ begin
                     -- because data are latched they update on next clock cycle (HIGH -> LOW)
                     if clkState = '1' then
                         dataOut := dataAggregate(currBit);
-                        currBit <= currBit - 1;
+                        -- prevent underflow
+                        if currBit > 0 then
+                            currBit <= currBit - 1;
+                        end if;
 
-                        if currBit = 24 or currBit = 16 or currBit = 8 or currBit = 0 then
+                        if currBit mod 8 = 0 then
                             fsmState <= ReleaseLine;
                         end if;
                     end if;
