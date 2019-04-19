@@ -11,6 +11,7 @@ entity pixel_shiftreg is
         pixelsOut         : out Pixel_Matrix
     );
 
+    constant SHIFT_LEN : natural := (IMG_CONSTS.width * 2) + 3;
     type Color_ShiftReg_Array is array (SHIFT_LEN - 1 downto 0) of Pixel_Data;
     alias WIDTH is IMG_CONSTS.width;
 end entity pixel_shiftreg;
@@ -29,7 +30,6 @@ begin
         end if;
     end process shiftProc;
 
-    -- TODO: nutne premysliet
     pixelsOut(0, 0) <= shiftReg(2);
     pixelsOut(0, 1) <= shiftReg(1);
     pixelsOut(0, 2) <= shiftReg(0);

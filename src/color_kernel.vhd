@@ -2,92 +2,146 @@ library ieee;
 use ieee.std_logic_1164.all;
 use ieee.numeric_std.all;
 use work.ccd_pkg.all;
+use work.kernel_pkg.all;
 
 entity color_kernel is
     generic(
         -- edge detection kernel
-        kernelParams   : Kernel_Params_Arr := (
-            -1, -1, -1,
-            -1, 8, -1,
-            -1, -1, -1
+        kernelParams   : Kernel_Consts := (
+            (-1, -1, -1),
+            (-1, 8, -1),
+            (-1, -1, -1)
         );
-        prescaleAmount : Prescale_Range    := 0
+        prescaleAmount : Conv_Prescale := 0
     );
     port(
-        clkIn, rstAsyncIn         : in  std_logic;
-        redIn, greenIn, blueIn    : in  Pixel_Data;
-        pixelValidIn              : in  boolean;
-        currXIn                   : in  Img_Width_Range;
-        currYIn                   : in  Img_Height_Range;
-        redOut, greenOut, blueOut : out Pixel_Data;
-        currXOut                  : out Img_Width_Range;
-        currYOut                  : out Img_Height_Range;
-        pixelValidOut             : out boolean
+        clkIn, rstAsyncIn      : in  std_logic;
+        pixelIn                : in  Pixel_Aggregate;
+        newPixelIn, frameEndIn : in  boolean;
+        currWidthIn            : in  Img_Width_Range;
+        currHeightIn           : in  Img_Height_Range;
+        pixelOut               : out Pixel_Aggregate;
+        currWidthOut           : out Img_Width_Range;
+        currHeightOut          : out Img_Height_Range;
+        newPixelOut            : out boolean
     );
-    type Adder_Tree is record
-        stage1 : Adder_Acc_1;
-        stage2 : Adder_Acc_2;
-        stage3 : Adder_Acc_3;
-    end record Adder_Tree;
 end entity color_kernel;
 
 architecture RTL of color_kernel is
-    -- parallel multiplication register (to enable pipelining)
-    signal mulAcc  : Mul_Acc    := (others => (others => '0'));
-    -- pipelined adder tree
-    signal addTree : Adder_Tree := (stage1 => (others => (others => '0')),
-                                    stage2 => (others => (others => '0')),
-                                    stage3 => (others => (others => '0'))
-                                   );
+    -- pixel shift register OUTPUT
+    signal pixelMatrix : Matrix_Aggregate := (others => (others => (others => X"00"))); -- that's a lOOOOng initialization
+
+    signal pixelCounter    : Pixel_Count_Range := 0;
+    signal currShiftWidth  : Img_Width_Range   := 0;
+    signal currShiftHeight : Img_Height_Range  := 0;
+
+    signal stage1Out : Stage_Out(open)(STAGE1_AMOUNT - 1 downto 0);
+    signal stage2Out : Stage_Out(open)(STAGE2_AMOUNT - 1 downto 0);
+    signal stage3Out : Stage_Out(open)(STAGE3_AMOUNT - 1 downto 0);
+
+    impure function isImageFringe return boolean is
+    begin
+        return currShiftHeight = 0 or currShiftHeight = IMG_WIDTH - 1 or currShiftWidth = 0 or currShiftWidth = IMG_WIDTH - 1;
+    end function isImageFringe;
 begin
-    kernelProc : process(clkIn, rstAsyncIn)
-        variable tempVal : signed(25 downto 0);
+    shiftProc : process(clkIn, rstAsyncIn)
     begin
         if rstAsyncIn = '1' then
-            mulAcc         <= (others => (others => '0'));
-            addTree.stage1 <= (others => (others => '0'));
-            addTree.stage2 <= (others => (others => '0'));
-            addTree.stage3 <= (others => (others => '0'));
-            tempVal        := (others => '0');
+            currShiftWidth  <= 0;
+            currShiftHeight <= 0;
+            pixelCounter    <= 0;
         elsif rising_edge(clkIn) then
-            if pixelValidIn then
-                for i in dataIn'low to dataIn'high loop
-                    -- signed 13b * signed 9b = signed 21b
-                    mulAcc(i) <= signed(resize(dataIn(i), dataIn(0)'length + 1)) * to_signed(kernelParams(i), KERNEL_PARAMS.data_len);
-                end loop;
 
-                for i in mulAcc'low to (mulAcc'high - 1) / 2 loop
-                    -- widen numbers before addition to prevent overflow (21b -> 22b)
-                    addTree.stage1(i) <= widen(mulAcc(2 * i)) + widen(mulAcc((2 * i) + 1));
-                end loop;
-                addTree.stage1(addTree.stage1'high) <= widen(mulAcc(mulAcc'high));
+            -- counter logic
+            if newPixelIn then
+                -- counts received valid pixels in current frame
+                pixelCounter <= pixelCounter + 1;
 
-                for i in addTree.stage1'low to (addTree.stage1'high - 1) / 2 loop
-                    -- widen numbers before addition to prevent overflow (22b -> 23b)
-                    addTree.stage2(i) <= widen(addTree.stage1(2 * i)) + widen(addTree.stage1((2 * i) + 1));
-                end loop;
-                addTree.stage2(addTree.stage2'high) <= widen(addTree.stage1(addTree.stage1'high));
-
-                for i in addTree.stage2'low to (addTree.stage2'high - 1) / 2 loop
-                    -- widen numbers before addition to prevent overflow (23b -> 24b)
-                    addTree.stage3(i) <= widen(addTree.stage2(2 * i)) + widen(addTree.stage2((2 * i) + 1));
-                end loop;
-                addTree.stage3(addTree.stage3'high) <= widen(addTree.stage2(addTree.stage2'high));
-
-                -- widen numbers before addition to prevent overflow (24b -> 25b)
-                tempVal := widen(addTree.stage3(0)) + widen(addTree.stage3(1));
-                -- optional final sum prescaling (division by power of 2)
-                tempVal := tempVal / 2**(abs prescaleAmount);
-                -- optional final sum negation
-                if (prescaleAmount < 0) then
-                    tempVal := -tempVal;
-                else
-                    tempVal := tempVal;
+                -- current width & height of pixel in shift register
+                if pixelCounter > IMG_WIDTH + 1 then
+                    if currShiftWidth >= IMG_WIDTH - 1 then
+                        currShiftWidth  <= 0;
+                        currShiftHeight <= currShiftHeight + 1;
+                    else
+                        currShiftWidth <= currShiftWidth + 1;
+                    end if;
                 end if;
 
-                -- TODO: test this function
+            elsif frameEndIn then
+                -- reset counters on start of new frame
+                pixelCounter    <= 0;
+                currShiftWidth  <= 0;
+                currShiftHeight <= 0;
+            end if;
 
+        end if;
+    end process shiftProc;
+
+    convStage1 : process(clkIn, rstAsyncIn)
+        variable tmpX, tmpY, tmpXA, tmpYA : natural;
+    begin
+        if rstAsyncIn = '1' then
+
+        elsif rising_edge(clkIn) then
+            if not isImageFringe then
+                if newPixelIn then
+                    for currColor in Internal_Pixel_Color loop
+                        for i in 0 to STAGE1_AMOUNT - 2 loop
+                            tmpY  := i / 3;
+                            tmpYA := (9 - i) / 3;
+                            tmpX  := i mod 3;
+                            tmpXA := (9 - i) mod 3;
+
+                            stage1Out(currColor)(i) <= (signed(pixelMatrix(currColor)(tmpY, tmpX)) * kernelParams(tmpY, tmpX)) + (signed(pixelMatrix(currColor)(tmpYA, tmpXA)) * kernelParams(tmpYA, tmpXA));
+                        end loop;
+                        stage1Out(currColor)(4) <= (signed(pixelMatrix(currColor)(1, 1) * kernelParams(1, 1)));
+                    end loop;
+                end if;
             end if;
         end if;
-    end process kernelProc;
+
+    end process convStage1;
+
+    convStage2 : process(clkIn, rstAsyncIn)
+    begin
+    end process convStage2;
+
+    convStage3 : process(clkIn, rstAsyncIn)
+    begin
+    end process convStage3;
+
+    convStage4 : process(clkIn, rstAsyncIn)
+    begin
+    end process convStage4;
+
+    redShiftReg : entity work.pixel_shiftreg
+        port map(
+            clkIn      => clkIn,
+            rstAsyncIn => rstAsyncIn,
+            -- TODO: parametrize
+            dataIn     => pixelIn(Red),
+            enableIn   => newPixelIn,
+            pixelsOut  => pixelMatrix(Red)
+        );
+
+    greenShiftReg : entity work.pixel_shiftreg
+        port map(
+            clkIn      => clkIn,
+            rstAsyncIn => rstAsyncIn,
+            -- TODO: parametrize
+            dataIn     => pixelIn(Green),
+            enableIn   => newPixelIn,
+            pixelsOut  => pixelMatrix(Green)
+        );
+
+    blueShiftReg : entity work.pixel_shiftreg
+        port map(
+            clkIn      => clkIn,
+            rstAsyncIn => rstAsyncIn,
+            -- TODO: parametrize
+            dataIn     => pixelIn(Blue),
+            enableIn   => newPixelIn,
+            pixelsOut  => pixelMatrix(Blue)
+        );
+
 end architecture RTL;
