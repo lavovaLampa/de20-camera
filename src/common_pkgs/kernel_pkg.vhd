@@ -6,6 +6,7 @@ use work.ccd_pkg.Internal_Pixel_Color;
 use work.ccd_pkg.Pixel_Matrix;
 
 package kernel_pkg is
+    -- ALIASES
     alias PIXEL_SIZE is IMG_CONSTS.pixel_data_size;
 
     -- CONSTANTS
@@ -26,7 +27,7 @@ package kernel_pkg is
     subtype Pipeline_Pixel is signed(Pipeline_Pixel_Range);
     type Kernel_Consts is array (2 downto 0, 2 downto 0) of integer;
     -- constant to divide (prescale) kernel with
-    subtype Conv_Prescale is integer range -12 to 12;
+    subtype Conv_Prescale is integer range -6 to 6; 
     type Matrix_Aggregate is array (Internal_Pixel_Color) of Pixel_Matrix;
     type Stage_Color_Out is array (natural range <>) of Pipeline_Pixel;
     type Stage_Out is array (Internal_Pixel_Color) of Stage_Color_Out;
