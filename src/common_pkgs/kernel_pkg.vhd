@@ -2,7 +2,7 @@ library ieee;
 use ieee.std_logic_1164.all;
 use ieee.numeric_std.all;
 use work.ccd_pkg.IMG_CONSTS;
-use work.ccd_pkg.Internal_Pixel_Color;
+use work.ccd_pkg.Pixel_Color;
 use work.ccd_pkg.Pixel_Matrix;
 
 package kernel_pkg is
@@ -25,17 +25,31 @@ package kernel_pkg is
 
     -- TYPES
     subtype Pipeline_Pixel is signed(Pipeline_Pixel_Range);
-    type Kernel_Consts is array (2 downto 0, 2 downto 0) of integer;
+    type Convolution_Params is array (2 downto 0, 2 downto 0) of integer;
     -- constant to divide (prescale) kernel with
-    subtype Conv_Prescale is integer range -6 to 6; 
-    type Matrix_Aggregate is array (Internal_Pixel_Color) of Pixel_Matrix;
+    subtype Convolution_Prescale is integer range -6 to 6;
+    type Matrix_Aggregate is array (Pixel_Color) of Pixel_Matrix;
     type Stage_Color_Out is array (natural range <>) of Pipeline_Pixel;
-    type Stage_Out is array (Internal_Pixel_Color) of Stage_Color_Out;
+    type Stage_Out is array (Pixel_Color) of Stage_Color_Out;
 
     -- FUNCTIONS
+    function toSaturatedUnsigned(val : signed; outLen : natural) return unsigned;
 
 end package kernel_pkg;
 
 package body kernel_pkg is
-
+    pure function toSaturatedUnsigned(val : signed; outLen : natural)
+    return unsigned is
+        variable temp : unsigned((outLen - 1) downto 0);
+    begin
+        assert outLen < val'length;
+        if val < 0 then
+            temp := (others => '0');
+        elsif val > to_signed((2**outLen) - 1, val'length) then
+            temp := (others => '1');
+        else
+            temp := unsigned(val((outLen - 1) downto 0));
+        end if;
+        return temp;
+    end function toSaturatedUnsigned;
 end package body kernel_pkg;

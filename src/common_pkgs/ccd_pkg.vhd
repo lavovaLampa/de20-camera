@@ -41,35 +41,35 @@ package ccd_pkg is
     );
 
     constant IMG_CONSTS : Image_Properties := (
-        width_start     => 1054,
-        height_start    => 759,
-        height          => 482,
-        width           => 642,
+        width_start     => 1053,
+        height_start    => 758,
+        height          => 484,
+        width           => 644,
         is_mirrored     => false,
         pixel_data_size => 8
     );
 
+    -- CCD TYPES
     subtype Ccd_Pixel_Data is std_logic_vector((CCD_CONSTS.data_len - 1) downto 0);
+    -- ccd has bayer color mask (2 * green pixel)
+    type Ccd_Pixel_Color is (Red, Green1, Green2, Blue);
+
+    -- INTERNAL TYPES
     subtype Pixel_Data is unsigned((IMG_CONSTS.pixel_data_size - 1) downto 0);
     subtype Pixel_Count_Range is natural range 0 to (IMG_CONSTS.width * IMG_CONSTS.height);
-    
-    type Internal_Pixel_Color is (Red, Green, Blue);
-    type Pixel_Aggregate is array (Internal_Pixel_Color) of Pixel_Data;
-    
-    type Pixel_Color is (Red, Green1, Green2, Blue);
-
+    type Pixel_Color is (Red, Green, Blue);
+    type Pixel_Aggregate is array (Pixel_Color) of Pixel_Data;
     type Pixel_Matrix is array (2 downto 0, 2 downto 0) of Pixel_Data;
 
     subtype Img_Height_Range is natural range 0 to IMG_CONSTS.height - 1;
     subtype Img_Width_Range is natural range 0 to IMG_CONSTS.width - 1;
 
-    pure function toSaturatedUnsigned(val : signed; outLen : natural) return unsigned;
-    pure function getCurrColor(currWidth : Img_Width_Range; currHeight : Img_Height_Range) return Pixel_Color;
+    pure function getCurrColor(currWidth : Img_Width_Range; currHeight : Img_Height_Range) return Ccd_Pixel_Color;
 end package ccd_pkg;
 
 package body ccd_pkg is
     pure function decodeColor(isEvenRow : boolean; isEvenColumn : boolean)
-    return Pixel_Color is
+    return Ccd_Pixel_Color is
     begin
         if isEvenColumn then
             if isEvenRow then
@@ -87,7 +87,7 @@ package body ccd_pkg is
     end function decodeColor;
 
     pure function currColorAbsolute(currWidth : CCD_WIDTH; currHeight : CCD_HEIGHT; isMirrored : boolean)
-    return Pixel_Color is
+    return Ccd_Pixel_Color is
         variable isEvenRow    : boolean := currHeight mod 2 = 0;
         variable isEvenColumn : boolean := currWidth mod 2 = 0;
     begin
@@ -99,26 +99,10 @@ package body ccd_pkg is
     end function currColorAbsolute;
 
     pure function getCurrColor(currWidth : Img_Width_Range; currHeight : Img_Height_Range)
-    return Pixel_Color is
+    return Ccd_Pixel_Color is
         variable absoluteWidth  : CCD_WIDTH  := IMG_CONSTS.width_start + currWidth;
         variable absoluteHeight : CCD_HEIGHT := IMG_CONSTS.height_start + currHeight;
     begin
         return currColorAbsolute(absoluteWidth, absoluteHeight, IMG_CONSTS.is_mirrored);
     end function getCurrColor;
-
-    pure function toSaturatedUnsigned(val : signed; outLen : natural)
-    return unsigned is
-        variable temp : unsigned((outLen - 1) downto 0);
-    begin
-        assert outLen < val'length;
-        if val < 0 then
-            temp := (others => '0');
-        elsif val > to_signed((2**outLen) - 1, val'length) then
-            temp := (others => '1');
-        else
-            temp := unsigned(val((outLen - 1) downto 0));
-        end if;
-        return temp;
-    end function toSaturatedUnsigned;
-
 end package body ccd_pkg;

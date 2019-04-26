@@ -4,6 +4,9 @@ use ieee.numeric_std.all;
 use work.ccd_pkg.all;
 
 entity pixel_shiftreg is
+    generic(
+        SHIFT_LEN : natural := (IMG_CONSTS.width * 2) + 3
+    );
     port(
         clkIn, rstAsyncIn : in  std_logic;
         dataIn            : in  Pixel_Data;
@@ -11,7 +14,7 @@ entity pixel_shiftreg is
         pixelsOut         : out Pixel_Matrix
     );
 
-    constant SHIFT_LEN : natural := (IMG_CONSTS.width * 2) + 3;
+    -- constant SHIFT_LEN : natural := (IMG_CONSTS.width * 2) + 3;
     type Color_ShiftReg_Array is array (SHIFT_LEN - 1 downto 0) of Pixel_Data;
     alias WIDTH is IMG_CONSTS.width;
 end entity pixel_shiftreg;

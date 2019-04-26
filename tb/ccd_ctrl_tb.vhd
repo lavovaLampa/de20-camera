@@ -105,7 +105,7 @@ begin
     end process;
 
 --    checkProc : process(clkIn, pixelValidOut)
---        variable currColor                       : Pixel_Color := Green1;
+--        variable currColor                       : Ccd_Pixel_Color := Green1;
 --        variable redColor, greenColor, blueColor : Pixel_Data;
 --        variable x, y                            : natural     := 0;
 --    begin

@@ -38,7 +38,7 @@ architecture RTL of ccd_ctrl is
     signal color11stage, color12stage : unsigned(8 downto 0) := B"0000_0000_0";
     signal color21stage, color22stage : unsigned(8 downto 0) := B"0000_0000_0";
     signal color3stage                : Pixel_Data           := B"0000_0000";
-    signal stageColor                 : Pixel_Color          := Green1;
+    signal stageColor                 : Ccd_Pixel_Color          := Green1;
     signal pipelineReady              : boolean              := false;
 
     -- demosaicStage2
@@ -102,7 +102,7 @@ begin
     end process shiftProc;
 
     demosaicStage1 : process(clkIn, rstAsyncIn)
-        variable currColor : Pixel_Color := getCurrColor(currShiftWidth, currShiftHeight);
+        variable currColor : Ccd_Pixel_Color := getCurrColor(currShiftWidth, currShiftHeight);
     begin
         if rstAsyncIn = '1' then
             currWidth  <= 0;

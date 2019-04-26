@@ -1,46 +1,44 @@
--- Testbench automatically generated online
--- at http://vhdl.lapinoo.net
--- Generation date : 23.4.2019 14:42:07 GMT
-
 library ieee;
 use ieee.std_logic_1164.all;
+use ieee.numeric_std.all;
+use work.ccd_pkg.all;
 use work.kernel_pkg.all;
+use work.color_kernel;
 
 entity tb_color_kernel is
+    constant TEST_KERNEL      : Convolution_Params   := (
+        (0, 0, 0),
+        (0, 1, 0),
+        (0, 0, 0)
+    );
+    constant TEST_PRESCALE    : Convolution_Prescale := 0;
+    constant TEST_FRAME_COUNT : natural              := 1;
+
+    -- 50 MHz
     constant CLK_PERIOD : time := 20 ns; -- EDIT Put right period here
+    type Image_Accumulator is array (0 to IMG_HEIGHT - 1, 0 to IMG_WIDTH - 1) of Pixel_Aggregate;
+    type Pipeline_Accumulator is array (Pixel_Color) of Pipeline_Pixel;
 end tb_color_kernel;
 
 architecture tb of tb_color_kernel is
+    -- WRITE-ONLY
+    signal clkIn, rstAsyncIn      : std_logic;
+    signal pixelIn                : Pixel_Aggregate;
+    signal newPixelIn, frameEndIn : boolean;
+    signal currWidthIn            : Img_Width_Range;
+    signal currHeightIn           : Img_Height_Range;
 
-    signal clkIn         : std_logic;
-    signal rstAsyncIn    : std_logic;
-    signal pixelIn       : pixel_aggregate;
-    signal newPixelIn    : boolean;
-    signal frameEndIn    : boolean;
-    signal currWidthIn   : img_width_range;
-    signal currHeightIn  : img_height_range;
-    signal pixelOut      : pixel_aggregate;
-    signal currWidthOut  : img_width_range;
-    signal currHeightOut : img_height_range;
-    signal newPixelOut   : boolean;
+    -- READ-ONLY
+    signal pixelOut    : Pixel_Aggregate;
+    signal newPixelOut : boolean;
+    signal frameEndOut : boolean;
 
+    -- INTERNAL
     signal TbClock    : std_logic := '0';
     signal TbSimEnded : std_logic := '0';
 
+    signal imgArray : Image_Accumulator := (others => (others => (others => X"00")));
 begin
-
-    dut : entity work.color_kernel
-        port map(clkIn         => clkIn,
-                 rstAsyncIn    => rstAsyncIn,
-                 pixelIn       => pixelIn,
-                 newPixelIn    => newPixelIn,
-                 frameEndIn    => frameEndIn,
-                 currWidthIn   => currWidthIn,
-                 currHeightIn  => currHeightIn,
-                 pixelOut      => pixelOut,
-                 currWidthOut  => currWidthOut,
-                 currHeightOut => currHeightOut,
-                 newPixelOut   => newPixelOut);
 
     -- Clock generation
     TbClock <= not TbClock after CLK_PERIOD / 2 when TbSimEnded /= '1' else '0';
@@ -48,14 +46,31 @@ begin
     -- EDIT: Check that clkIn is really your main clock signal
     clkIn <= TbClock;
 
+    dut : entity work.color_kernel
+        generic map(
+            kernelParams   => TEST_KERNEL,
+            prescaleAmount => TEST_PRESCALE
+        )
+        port map(
+            clkIn       => clkIn,
+            rstAsyncIn  => rstAsyncIn,
+            pixelIn     => pixelIn,
+            newPixelIn  => newPixelIn,
+            frameEndIn  => frameEndIn,
+            pixelOut    => pixelOut,
+            newPixelOut => newPixelOut,
+            frameEndOut => frameEndOut
+        );
+
     stimuli : process
+        variable tmpPixel : Pixel_Data := X"00";
     begin
         -- EDIT Adapt initialization as needed
-        pixelIn      <= '0';
-        newPixelIn   <= '0';
-        frameEndIn   <= '0';
-        currWidthIn  <= '0';
-        currHeightIn <= '0';
+        pixelIn      <= (others => X"00");
+        newPixelIn   <= false;
+        frameEndIn   <= false;
+        currWidthIn  <= 0;
+        currHeightIn <= 0;
 
         -- Reset generation
         rstAsyncIn <= '1';
@@ -63,15 +78,80 @@ begin
         rstAsyncIn <= '0';
         wait for 2 * CLK_PERIOD;
 
-        for y in 0 to IMG_HEIGHT - 1 loop
-            for x in 0 to IMG_WIDTH - 1 loop
-
+        for n in 0 to TEST_FRAME_COUNT - 1 loop
+            frameEndIn <= false;
+            for y in 0 to IMG_HEIGHT - 1 loop
+                for x in 0 to IMG_WIDTH - 1 loop
+                    wait until rising_edge(clkIn);
+                    newPixelIn <= true;
+                    for currColor in Pixel_Color loop
+                        tmpPixel                  := to_unsigned(x, 8);
+                        imgArray(y, x)(currColor) <= tmpPixel;
+                        pixelIn(currColor)        <= tmpPixel;
+                    end loop;
+                end loop;
+                wait until rising_edge(clkIn);
+                newPixelIn <= false;
+                wait for 5 * CLK_PERIOD; -- horizontal blank
             end loop;
+            frameEndIn <= true;
+            newPixelIn <= false;
+            wait for 10 * CLK_PERIOD;   -- vertical blank
         end loop;
 
         -- Stop the clock and hence terminate the simulation
         TbSimEnded <= '1';
         wait;
+    end process;
+
+    outputCheck : process(clkIn, rstAsyncIn)
+        constant OUTPUT_WIDTH  : natural := IMG_WIDTH - 2;
+        constant OUTPUT_HEIGHT : natural := IMG_HEIGHT - 2;
+
+        variable currWidth, arrayWidth   : Img_Width_Range      := 0;
+        variable currHeight, arrayHeight : Img_Height_Range     := 0;
+        variable pixelAcc                : Pipeline_Accumulator := (others => X"000");
+        variable pixelCounter            : natural              := 0;
+        variable tmpPixel                : Pixel_Data           := X"00";
+    begin
+        if rstAsyncIn = '1' then
+            pixelCounter := 0;
+            currWidth    := 0;
+            currHeight   := 0;
+        elsif rising_edge(clkIn) then
+            if newPixelOut then
+                pixelCounter := pixelCounter + 1;
+                arrayWidth   := currWidth + 1;
+                arrayHeight  := currHeight + 1;
+
+                for currColor in Pixel_Color loop
+                    pixelAcc(currColor) := X"000";
+                    for y in 0 to 2 loop
+                        for x in 0 to 2 loop
+                            pixelAcc(currColor) := pixelAcc(currColor) + ((TEST_KERNEL(y - 1, x - 1) * signed(imgArray(arrayHeight + y - 1, arrayWidth + x - 1)(currColor))));
+                        end loop;
+                    end loop;
+                    pixelAcc(currColor) := pixelAcc(currColor) / (2 ** TEST_PRESCALE);
+                    tmpPixel            := toSaturatedUnsigned(pixelAcc(currColor), IMG_CONSTS.pixel_data_size);
+
+                    assert tmpPixel = pixelOut(currColor) report "received wrong pixel value" severity failure;
+                end loop;
+
+                if currWidth >= OUTPUT_WIDTH - 1 then
+                    currWidth  := 0;
+                    currHeight := currHeight + 1;
+                else
+                    currWidth := currWidth + 1;
+                end if;
+
+                if frameEndOut then
+                    assert pixelCounter = OUTPUT_WIDTH * OUTPUT_HEIGHT report "didn't receive all pixel or received more" severity failure;
+                    currWidth    := 0;
+                    currHeight   := 0;
+                    pixelCounter := 0;
+                end if;
+            end if;
+        end if;
     end process;
 
 end tb;

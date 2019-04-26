@@ -1,5 +1,5 @@
 # project name
-PROJECT=bus_led_top
+PROJECT=de20-camera
 # vhdl files
 FILES = 
 # testbench
@@ -12,10 +12,10 @@ GHDL_SIM_OPT    = --assert-level=error
 SIMDIR = simu
 SYNTHFILES = bin/bus_led_ise/netgen/synthesis
 
-GHDL_CMD        = ghdl
-GHDL_FLAGS      = --ieee=synopsys --warn-no-vital-generic
+GHDL_CMD = ghdl
+GHDL_FLAGS = --std=08
 
-VIEW_CMD        = /usr/bin/gtkwave
+VIEW_CMD = gtkwave
 
 ghdl-compile :                                                                                                 
  mkdir -p simu                                                                                               
