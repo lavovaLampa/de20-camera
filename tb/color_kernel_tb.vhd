@@ -5,7 +5,7 @@ use work.ccd_pkg.all;
 use work.kernel_pkg.all;
 use work.color_kernel;
 
-entity tb_color_kernel is
+entity color_kernel_tb is
     constant TEST_KERNEL      : Convolution_Params   := (
         (0, 0, 0),
         (0, 1, 0),
@@ -18,9 +18,9 @@ entity tb_color_kernel is
     constant CLK_PERIOD : time := 20 ns; -- EDIT Put right period here
     type Image_Accumulator is array (0 to IMG_HEIGHT - 1, 0 to IMG_WIDTH - 1) of Pixel_Aggregate;
     type Pipeline_Accumulator is array (Pixel_Color) of Pipeline_Pixel;
-end tb_color_kernel;
+end color_kernel_tb;
 
-architecture tb of tb_color_kernel is
+architecture tb of color_kernel_tb is
     -- WRITE-ONLY
     signal clkIn, rstAsyncIn      : std_logic;
     signal pixelIn                : Pixel_Aggregate;

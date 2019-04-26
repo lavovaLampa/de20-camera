@@ -187,7 +187,8 @@ begin
 
     redShiftReg : entity work.pixel_shiftreg
         generic map(
-            SHIFT_LEN => (2 * IMG_WIDTH) + 3
+            SHIFT_LEN => (2 * IMG_WIDTH) + 3,
+            LINE_WIDTH => IMG_WIDTH
         )
         port map(
             clkIn      => clkIn,
@@ -200,7 +201,8 @@ begin
 
     greenShiftReg : entity work.pixel_shiftreg
         generic map(
-            SHIFT_LEN => (2 * IMG_WIDTH) + 3
+            SHIFT_LEN => (2 * IMG_WIDTH) + 3,
+            LINE_WIDTH => IMG_WIDTH
         )
         port map(
             clkIn      => clkIn,
@@ -213,7 +215,8 @@ begin
 
     blueShiftReg : entity work.pixel_shiftreg
         generic map(
-            SHIFT_LEN => (2 * IMG_WIDTH) + 3
+            SHIFT_LEN => (2 * IMG_WIDTH) + 3,
+            LINE_WIDTH => IMG_WIDTH
         )
         port map(
             clkIn      => clkIn,
