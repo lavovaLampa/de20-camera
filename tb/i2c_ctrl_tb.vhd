@@ -3,11 +3,7 @@ use ieee.std_logic_1164.all;
 use work.i2c_pkg.all;
 use work.i2c_ctrl;
 
-library vunit_lib;
-
 entity tb_i2c_ctrl is
-    generic(runner_cfg : string);
-
     constant I2C_PERIOD : time := 10 us;
     -- clock has to be 2 times i2c clock
     constant CLK_PERIOD : time := 2 * I2C_PERIOD;
@@ -53,7 +49,6 @@ begin
 
     stimuli : process
     begin
-        test_runner_setup(runner, runner_cfg);
 
         -- EDIT Adapt initialization as needed
         enableIn   <= false;
@@ -75,7 +70,6 @@ begin
         wait until rising_edge(clkIn);
 
         wait until doneOut = true;
-        test_runner_cleanup(runner);    -- Simulation ends here
         -- Stop the clock and hence terminate the simulation
         tbSimEnded <= '1';
         wait;
