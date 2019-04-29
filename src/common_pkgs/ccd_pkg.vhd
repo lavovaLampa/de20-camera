@@ -40,11 +40,20 @@ package ccd_pkg is
         data_len      => 12
     );
 
+--    constant IMG_CONSTS : Image_Properties := (
+--        width_start     => 1053,
+--        height_start    => 758,
+--        height          => 484,
+--        width           => 644,
+--        is_mirrored     => false,
+--        pixel_data_size => 8
+--    );
+
     constant IMG_CONSTS : Image_Properties := (
         width_start     => 1053,
         height_start    => 758,
-        height          => 484,
-        width           => 644,
+        height          => 64,
+        width           => 84,
         is_mirrored     => false,
         pixel_data_size => 8
     );

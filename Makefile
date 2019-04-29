@@ -11,13 +11,13 @@ FILES += $(LIBS)
 
 # simulator (GHDL) variables
 GHDL_CMD = ghdl
-WAVE_OUT_NAME = wave_out.ghw
+WAVE_OUT_NAME = wave_out.vcd
 WORKDIR = work
 MAKE_OPTS = --std=08
 ANALYSIS_OPTS = --std=08 
 ELABORATE_OPTS = --std=08
 RUN_OPTS = --std=08 -Wunused -Wothers -Wstatic 
-WAVE_OPTS = --wave=$(WORKDIR)/$(WAVE_OUT_NAME)
+WAVE_OPTS = --vcd=$(WORKDIR)/$(WAVE_OUT_NAME)
 
 # GHDL file/entity mapping file
 GHDL_LIB_INFO = $(WORKDIR)/work-obj08.cf

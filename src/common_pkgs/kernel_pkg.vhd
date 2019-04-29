@@ -11,8 +11,8 @@ package kernel_pkg is
 
     -- CONSTANTS
     constant PIPELINE_STAGE_AMOUNT : natural := 4;
-    -- necessary to prevent overflow during addition
-    constant PIPELINE_SIZE         : natural := PIXEL_SIZE + PIPELINE_STAGE_AMOUNT;
+    -- 17 bit data width should be enough to prevent under/overflows
+    constant PIPELINE_SIZE         : natural := 17;
     constant IMG_WIDTH             : natural := IMG_CONSTS.width - 2;
     constant IMG_HEIGHT            : natural := IMG_CONSTS.height - 2;
 
@@ -20,17 +20,17 @@ package kernel_pkg is
     constant STAGE2_AMOUNT : natural := 3;
     constant STAGE3_AMOUNT : natural := 2;
 
-    -- RANGES
-    subtype Pipeline_Pixel_Range is natural range PIPELINE_SIZE - 1 downto 0;
-
     -- TYPES
-    subtype Pipeline_Pixel is signed(Pipeline_Pixel_Range);
-    type Convolution_Params is array (2 downto 0, 2 downto 0) of integer;
-    -- constant to divide (prescale) kernel with
-    subtype Convolution_Prescale is integer range -6 to 6;
-    type Matrix_Aggregate is array (Pixel_Color) of Pixel_Matrix;
+    subtype Pipeline_Pixel is signed(PIPELINE_SIZE - 1 downto 0);
     type Stage_Color_Out is array (natural range <>) of Pipeline_Pixel;
     type Stage_Out is array (Pixel_Color) of Stage_Color_Out;
+
+    type Matrix_Aggregate is array (Pixel_Color) of Pixel_Matrix;
+
+    -- 5 bit
+    type Convolution_Params is array (2 downto 0, 2 downto 0) of integer range -16 to 15;
+    -- constant to divide (prescale) kernel with
+    subtype Convolution_Prescale is integer range -6 to 6;
 
     -- FUNCTIONS
     function toSaturatedUnsigned(val : signed; outLen : natural) return unsigned;

@@ -33,17 +33,24 @@ architecture RTL of color_kernel is
     signal pixelCounter    : Pixel_Count_Range := 0;
     signal currShiftWidth  : Img_Width_Range   := 0;
     signal currShiftHeight : Img_Height_Range  := 0;
+    
+    signal pixelInBuffer : boolean := false;
 
-    signal stage1Out                                         : Stage_Out(open)(STAGE1_AMOUNT - 1 downto 0);
-    signal stage2Out                                         : Stage_Out(open)(STAGE2_AMOUNT - 1 downto 0);
-    signal stage3Out                                         : Stage_Out(open)(STAGE3_AMOUNT - 1 downto 0);
-    signal stage1Ready, stage2Ready, stage3Ready             : boolean := false;
-    signal stage1LastPixel, stage2LastPixel, stage3LastPixel : boolean := false;
+    signal stage1Out                                      : Stage_Out(open)(STAGE1_AMOUNT - 1 downto 0);
+    signal stage2Out                                      : Stage_Out(open)(STAGE2_AMOUNT - 1 downto 0);
+    signal stage3Out                                      : Stage_Out(open)(STAGE3_AMOUNT - 1 downto 0);
+    signal stage1Ready, stage2Ready, stage3Ready          : boolean := false;
+    signal stage1FrameEnd, stage2FrameEnd, stage3FrameEnd : boolean := false;
 
-    impure function isImageFringe return boolean is
+    impure function isImageEdge return boolean is
     begin
         return currShiftHeight = 0 or currShiftHeight = IMG_WIDTH - 1 or currShiftWidth = 0 or currShiftWidth = IMG_WIDTH - 1;
-    end function isImageFringe;
+    end function isImageEdge;
+
+    impure function isFrameEnd return boolean is
+    begin
+        return frameEndIn or pixelCounter >= IMG_WIDTH * IMG_HEIGHT;
+    end function isFrameEnd;
 begin
     shiftProc : process(clkIn, rstAsyncIn)
     begin
@@ -52,6 +59,7 @@ begin
             currShiftHeight <= 0;
             pixelCounter    <= 0;
         elsif rising_edge(clkIn) then
+            pixelInBuffer <= newPixelIn;
 
             -- counter logic
             if newPixelIn then
@@ -67,45 +75,60 @@ begin
                         currShiftWidth <= currShiftWidth + 1;
                     end if;
                 end if;
+            end if;
 
-            elsif frameEndIn then
-                -- reset counters on start of new frame
+            -- reset counters on start of new frame
+            if isFrameEnd then
                 pixelCounter    <= 0;
                 currShiftWidth  <= 0;
                 currShiftHeight <= 0;
             end if;
-
         end if;
     end process shiftProc;
 
     convStage1 : process(clkIn, rstAsyncIn)
-        variable leftX, leftY, rightX, rightY : natural;
+        variable leftX, leftY, rightX, rightY    : natural;
+        variable mulAcc, leftMulAcc, rightMulAcc : signed(13 downto 0);
     begin
         if rstAsyncIn = '1' then
             for currColor in Pixel_Color loop
                 for i in 0 to STAGE1_AMOUNT - 1 loop
-                    stage1Out(currColor)(i) <= X"000";
+                    stage1Out(currColor)(i) <= (others => '0');
                 end loop;
             end loop;
+            stage1Ready    <= false;
+            stage1FrameEnd <= false;
         elsif rising_edge(clkIn) then
             -- propagate new pixel
-            stage1Ready     <= not isImageFringe and newPixelIn;
-            stage1LastPixel <= currShiftHeight = IMG_WIDTH - 2 and currShiftHeight = IMG_HEIGHT - 2;
+            stage1Ready    <= not isImageEdge and pixelInBuffer;
+            stage1FrameEnd <= isFrameEnd;
 
-            if not isImageFringe then
-                if newPixelIn then
-                    for currColor in Pixel_Color loop
-                        for i in 0 to STAGE1_AMOUNT - 2 loop
-                            leftY  := i / 3;
-                            rightY := (8 - i) / 3;
-                            leftX  := i mod 3;
-                            rightX := (8 - i) mod 3;
+--            report "Pixel counter: " & natural'image(pixelCounter);
+--            report "Height x Width: " & natural'image(currShiftHeight) & " x " & natural'image(currShiftWidth);
+--            report "Stage Ready: " & boolean'image(stage1Ready);
+--            report "isImageEdge: " & boolean'image(isImageEdge);
+--            report "newPixelIn: " & boolean'image(newPixelIn);
+--            report "pixelInBuffer: " & boolean'image(pixelInBuffer);
+            if not isImageEdge and newPixelIn then
+                for currColor in Pixel_Color loop
+                    --                    report "Current color: " & Pixel_Color'image(currColor);
+                    for i in 0 to STAGE1_AMOUNT - 2 loop
+                        leftY  := i / 3;
+                        rightY := (8 - i) / 3;
+                        leftX  := i mod 3;
+                        rightX := (8 - i) mod 3;
 
-                            stage1Out(currColor)(i) <= (signed(resize(pixelMatrix(currColor)(leftY, leftX), PIPELINE_SIZE)) * kernelParams(leftY, leftX)) + (signed(resize(pixelMatrix(currColor)(rightY, rightX), PIPELINE_SIZE)) * kernelParams(rightY, rightX));
-                        end loop;
-                        stage1Out(currColor)(4) <= (signed(resize(pixelMatrix(currColor)(1, 1), PIPELINE_SIZE)) * kernelParams(1, 1));
+                        leftMulAcc  := signed(resize(pixelMatrix(currColor)(leftY, leftX), PIXEL_SIZE + 1)) * to_signed(kernelParams(leftY, leftX), 5);
+                        rightMulAcc := signed(resize(pixelMatrix(currColor)(rightY, rightX), PIXEL_SIZE + 1)) * to_signed(kernelParams(rightY, rightX), 5);
+
+                        --                        report "left + right VAL: " & integer'image(to_integer(leftMulAcc)) &  " + " & integer'image(to_integer(rightMulAcc));
+
+                        stage1Out(currColor)(i) <= resize(leftMulAcc, PIPELINE_SIZE) + resize(rightMulAcc, PIPELINE_SIZE);
                     end loop;
-                end if;
+                    mulAcc                  := signed(resize(pixelMatrix(currColor)(1, 1), 9)) * to_signed(kernelParams(1, 1), 5);
+                    --                    report "center VAL: " & integer'image(to_integer(mulAcc)) & LF;
+                    stage1Out(currColor)(4) <= resize(mulAcc, PIPELINE_SIZE);
+                end loop;
             end if;
         end if;
 
@@ -116,20 +139,26 @@ begin
         if rstAsyncIn = '1' then
             for currColor in Pixel_Color loop
                 for i in 0 to STAGE2_AMOUNT - 1 loop
-                    stage2Out(currColor)(i) <= X"000";
+                    stage2Out(currColor)(i) <= (others => '0');
                 end loop;
             end loop;
+            stage2Ready    <= false;
+            stage2FrameEnd <= false;
         elsif rising_edge(clkIn) then
             -- propagate new pixel
-            stage2Ready     <= stage1Ready;
-            stage2LastPixel <= stage1LastPixel;
+            stage2Ready    <= stage1Ready;
+            stage2FrameEnd <= stage1FrameEnd;
 
             if stage1Ready then
                 for currColor in Pixel_Color loop
+                    --                    report "STAGE2" & LF & "Current color: " & Pixel_Color'image(currColor);
                     for i in 0 to STAGE2_AMOUNT - 2 loop
                         stage2Out(currColor)(i) <= stage1Out(currColor)(i) + stage1Out(currColor)(STAGE1_AMOUNT - 1 - i);
+                        --                        report "left + right VAL: " & integer'image(to_integer(stage1Out(currColor)(i))) &  " + " & integer'image(to_integer(stage1Out(currColor)(STAGE1_AMOUNT - 1 -i)));
+                        --                        report "out VAL: " & integer'image(to_integer(stage1Out(currColor)(i) + stage1Out(currColor)(STAGE1_AMOUNT - 1 - i)));
                     end loop;
                     stage2Out(currColor)(2) <= stage1Out(currColor)(2);
+                    --                    report "center VAL: " & integer'image(to_integer(stage1Out(currColor)(2))) & LF;
                 end loop;
             end if;
         end if;
@@ -140,42 +169,51 @@ begin
         if rstAsyncIn = '1' then
             for currColor in Pixel_Color loop
                 for i in 0 to STAGE3_AMOUNT - 1 loop
-                    stage3Out(currColor)(i) <= X"000";
+                    stage3Out(currColor)(i) <= (others => '0');
                 end loop;
             end loop;
+            stage3Ready    <= false;
+            stage3FrameEnd <= false;
         elsif rising_edge(clkIn) then
             -- propagate new pixel
-            stage3Ready     <= stage2Ready;
-            stage3LastPixel <= stage2LastPixel;
+            stage3Ready    <= stage2Ready;
+            stage3FrameEnd <= stage2FrameEnd;
 
             if stage2Ready then
                 for currColor in Pixel_Color loop
+                    --                    report "STAGE3" & LF & "Current color: " & Pixel_Color'image(currColor);
                     for i in 0 to STAGE3_AMOUNT - 2 loop
                         stage3Out(currColor)(i) <= stage2Out(currColor)(i) + stage2Out(currColor)(STAGE2_AMOUNT - 1 - i);
+                        --                        report "left + right VAL: " & integer'image(to_integer(stage2Out(currColor)(i))) &  " + " & integer'image(to_integer(stage2Out(currColor)(STAGE2_AMOUNT - 1 -i)));
                     end loop;
-                    stage3Out(currColor)(1) <= stage2Out(currColor)(2);
+                    stage3Out(currColor)(1) <= stage2Out(currColor)(1);
+                    --                    report "center VAL: " & integer'image(to_integer(stage2Out(currColor)(1))) & LF;
                 end loop;
             end if;
         end if;
     end process convStage3;
 
     convStage4 : process(clkIn, rstAsyncIn)
-        variable tmp         : Pipeline_Pixel := X"000";
+        variable tmp         : Pipeline_Pixel := (others => '0');
         variable tmpUnsigned : Pixel_Data     := X"00";
     begin
         if rstAsyncIn = '1' then
             for currColor in Pixel_Color loop
                 pixelOut(currColor) <= X"00";
             end loop;
+            newPixelOut <= false;
+            frameEndOut <= false;
         elsif rising_edge(clkIn) then
             -- propagate new pixel
             newPixelOut <= stage3Ready;
-            frameEndOut <= stage3LastPixel;
+            frameEndOut <= stage3FrameEnd;
 
             if stage3Ready then
                 for currColor in Pixel_Color loop
                     tmp         := stage3Out(currColor)(0) + stage3Out(currColor)(1);
+                    --                    report "Before PreScale: " & integer'image(to_integer(tmp)) severity note;
                     tmp         := tmp / (2 ** prescaleAmount);
+                    --                    report "After PreScale: " & integer'image(to_integer(tmp)) severity note;
                     tmpUnsigned := toSaturatedUnsigned(tmp, IMG_CONSTS.pixel_data_size);
 
                     -- convert back to unsigned, we can be sure the number is correct unsigned value because of IF block
@@ -187,7 +225,7 @@ begin
 
     redShiftReg : entity work.pixel_shiftreg
         generic map(
-            SHIFT_LEN => (2 * IMG_WIDTH) + 3,
+            SHIFT_LEN  => (2 * IMG_WIDTH) + 3,
             LINE_WIDTH => IMG_WIDTH
         )
         port map(
@@ -201,7 +239,7 @@ begin
 
     greenShiftReg : entity work.pixel_shiftreg
         generic map(
-            SHIFT_LEN => (2 * IMG_WIDTH) + 3,
+            SHIFT_LEN  => (2 * IMG_WIDTH) + 3,
             LINE_WIDTH => IMG_WIDTH
         )
         port map(
@@ -215,7 +253,7 @@ begin
 
     blueShiftReg : entity work.pixel_shiftreg
         generic map(
-            SHIFT_LEN => (2 * IMG_WIDTH) + 3,
+            SHIFT_LEN  => (2 * IMG_WIDTH) + 3,
             LINE_WIDTH => IMG_WIDTH
         )
         port map(
