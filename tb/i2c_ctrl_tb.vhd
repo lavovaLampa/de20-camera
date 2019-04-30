@@ -3,7 +3,7 @@ use ieee.std_logic_1164.all;
 use work.i2c_pkg.all;
 use work.i2c_ctrl;
 
-entity tb_i2c_ctrl is
+entity i2c_ctrl_tb is
     constant I2C_PERIOD : time := 10 us;
     -- clock has to be 2 times i2c clock
     constant CLK_PERIOD : time := 2 * I2C_PERIOD;
@@ -11,9 +11,9 @@ entity tb_i2c_ctrl is
     constant TEST_DATA     : I2c_Data := X"00FF";
     constant TEST_DEV_ADDR : I2c_Addr := CCD_WRITE_ADDR;
     constant TEST_REG_ADDR : I2c_Addr := X"03";
-end tb_i2c_ctrl;
+end i2c_ctrl_tb;
 
-architecture tb of tb_i2c_ctrl is
+architecture tb of i2c_ctrl_tb is
 
     signal clkIn      : std_logic := '0';
     signal rstAsyncIn : std_logic := '0';
@@ -49,7 +49,6 @@ begin
 
     stimuli : process
     begin
-
         -- EDIT Adapt initialization as needed
         enableIn   <= false;
         dataIn     <= X"0000";
@@ -96,6 +95,7 @@ begin
                 when Receive =>
                     currBit := i2cBusStateToLogic(sDataIO);
                     report "Received bit (index): " & natural'image(bitPointer) & " -> Value: " & std_logic'image(currBit);
+                    dataInAcc(bitPointer) := currBit;
                     -- release line
                     dataOut := '1';
 
@@ -133,10 +133,15 @@ begin
             tmpDevAddr := dataInAcc(31 downto 24);
             tmpRegAddr := dataInAcc(23 downto 16);
             tmpData    := dataInAcc(DATA_WIDTH - 1 downto 0);
+            report to_hstring(dataInAcc);
 
-            assert tmpDevAddr = TEST_DEV_ADDR report "Device address" & LF & "Expected: " & LF & "Received: " severity failure;
+            assert tmpDevAddr = TEST_DEV_ADDR report "Wrong device address received" & LF &
+            "Expected: 0x" & to_hstring(TEST_DEV_ADDR)  & LF &
+            "Received: 0x" & to_hstring(tmpDevAddr) severity failure;
             assert tmpRegAddr = TEST_REG_ADDR report "received register address is not equal" severity failure;
-            assert tmpData = TEST_DATA report "received data is not equal" severity failure;
+            assert tmpData = TEST_DATA report "Received wrong data (not equal to what was sent)" & LF &
+            "Expected: 0x" & to_hstring(TEST_DATA) & LF &
+            "Received: 0x" & to_hstring(tmpData) severity failure;
         end if;
 
         sDataIO <= logicToI2CBusState(dataOut);
