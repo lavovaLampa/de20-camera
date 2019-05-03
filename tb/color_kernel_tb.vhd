@@ -1,7 +1,7 @@
 library ieee;
 use ieee.std_logic_1164.all;
 use ieee.numeric_std.all;
-use work.ccd_pkg.all;
+use work.common_pkg.all;
 use work.kernel_pkg.all;
 use work.color_kernel;
 

@@ -1,9 +1,7 @@
 library ieee;
 use ieee.std_logic_1164.all;
 use ieee.numeric_std.all;
-use work.ccd_pkg.IMG_CONSTS;
-use work.ccd_pkg.Pixel_Color;
-use work.ccd_pkg.Pixel_Matrix;
+use work.common_pkg.all;
 
 package kernel_pkg is
     -- ALIASES

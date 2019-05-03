@@ -4,10 +4,11 @@
 
 library ieee;
 use ieee.std_logic_1164.all;
-use work.ccd_pkg.all;
-use std.textio.all;
-use work.ccd_ctrl;
 use ieee.numeric_std.all;
+use std.textio.all;
+use work.ccd_pkg.all;
+use work.common_pkg.all;
+use work.ccd_ctrl;
 
 entity ccd_ctrl_tb is
     alias IMG_WIDTH is IMG_CONSTS.width;
@@ -63,11 +64,8 @@ begin
                  frameValidIn  => frameValidIn,
                  lineValidIn   => lineValidIn,
                  pixelDataIn   => pixelDataIn,
-                 redOut        => redOut,
-                 greenOut      => greenOut,
-                 blueOut       => blueOut,
-                 currXOut      => currXOut,
-                 currYOut      => currYOut,
+                 currWidthOut  => currXOut,
+                 currHeightOut => currYOut,
                  pixelValidOut => pixelValidOut);
 
     -- Clock generation
