@@ -8,22 +8,23 @@ entity i2c_ctrl_tb is
     -- clock has to be 2 times i2c clock
     constant CLK_PERIOD : time := 2 * I2C_PERIOD;
 
-    constant TEST_DATA     : I2c_Data := X"00FF";
-    constant TEST_DEV_ADDR : I2c_Addr := CCD_WRITE_ADDR;
-    constant TEST_REG_ADDR : I2c_Addr := X"03";
+    constant TEST_DATA           : I2c_Data                      := X"5555";
+    constant TEST_DEV_ADDR       : I2c_Addr                      := CCD_WRITE_ADDR;
+    constant TEST_REG_ADDR       : I2c_Addr                      := X"55";
+    constant TEST_DATA_AGGREGATE : std_logic_vector(31 downto 0) := TEST_DEV_ADDR & TEST_REG_ADDR & TEST_DATA;
 end i2c_ctrl_tb;
 
 architecture tb of i2c_ctrl_tb is
 
-    signal clkIn      : std_logic := '0';
-    signal rstAsyncIn : std_logic := '0';
-    signal enableIn   : boolean   := false;
-    signal dataIn     : i2c_data  := X"0000";
-    signal devAddrIn  : i2c_addr  := X"00";
-    signal dataAddrIn : i2c_addr  := X"00";
-    signal doneOut    : boolean;
-    signal sClkOut    : std_logic;
-    signal sDataIO    : std_logic := 'Z';
+    signal clkIn             : std_logic := '0';
+    signal rstAsyncIn        : std_logic := '0';
+    signal enableIn          : boolean   := false;
+    signal dataIn            : i2c_data  := X"0000";
+    signal devAddrIn         : i2c_addr  := X"00";
+    signal dataAddrIn        : i2c_addr  := X"00";
+    signal doneOut, errorOut : boolean;
+    signal sClkOut           : std_logic;
+    signal sDataIO           : std_logic := 'Z';
 
     signal tbClock    : std_logic := '0';
     signal tbSimEnded : std_logic := '0';
@@ -38,6 +39,7 @@ begin
                  devAddrIn  => devAddrIn,
                  dataAddrIn => dataAddrIn,
                  doneOut    => doneOut,
+                 errorOut   => errorOut,
                  sClkOut    => sClkOut,
                  sDataIO    => sDataIO);
 
@@ -69,13 +71,16 @@ begin
         wait until rising_edge(clkIn);
 
         wait until doneOut = true;
+        assert not errorOut;
+        -- wait for stop bit
+        wait for 10 * CLK_PERIOD;
         -- Stop the clock and hence terminate the simulation
         tbSimEnded <= '1';
         wait;
     end process;
 
     mockSlave : process(sClkOut, sDataIO, rstAsyncIn)
-        type Slave_State is (AwaitStart, Receive, Acknowledge, AwaitStop);
+        type Slave_State is (AwaitStart, Receive, Acknowledge, SkipAck, AwaitStop);
 
         variable dataInAcc              : I2c_Aggregate        := X"00000000";
         variable state                  : Slave_State          := AwaitStart;
@@ -91,25 +96,39 @@ begin
             dataOut    := '1';
             dataInAcc  := X"00000000";
         elsif rising_edge(sClkOut) then
+            currBit := i2cBusStateToLogic(sDataIO);
             case state is
                 when Receive =>
-                    currBit := i2cBusStateToLogic(sDataIO);
                     report "Received bit (index): " & natural'image(bitPointer) & " -> Value: " & std_logic'image(currBit);
-                    dataInAcc(bitPointer) := currBit;
-                    -- release line
-                    dataOut := '1';
+                    assert currBit = TEST_DATA_AGGREGATE(bitPointer) report "Received wrong bit value at index: " & natural'image(bitPointer) & LF &
+                    "Expected: " & std_logic'image(TEST_DATA_AGGREGATE(bitPointer)) & LF &
+                    "Received: " & std_logic'image(currBit) severity warning;
 
+                    dataInAcc(bitPointer) := currBit;
                     if bitPointer mod 8 = 0 then
                         state := Acknowledge;
                     else
                         bitPointer := bitPointer - 1;
                     end if;
 
+                when SkipAck =>
+                    assert currBit = '0' report "byte wasn't acknowledged or data bus wasn't free" severity note;
+
+                when others =>
+                    null;
+            end case;
+
+        elsif falling_edge(sClkOut) then
+            case state is
                 when Acknowledge =>
-                    report "byte acknowledged" severity note;
-                    state   := Receive;
                     dataOut := '0';
+                    state   := SkipAck;
+
+                when SkipAck =>
+                    -- release line
+                    dataOut := '1';
                     if bitPointer > 0 then
+                        state      := Receive;
                         bitPointer := bitPointer - 1;
                     else
                         state := AwaitStop;
@@ -133,12 +152,14 @@ begin
             tmpDevAddr := dataInAcc(31 downto 24);
             tmpRegAddr := dataInAcc(23 downto 16);
             tmpData    := dataInAcc(DATA_WIDTH - 1 downto 0);
-            report to_hstring(dataInAcc);
+            report "Data received OK: 0x" & to_hstring(dataInAcc);
 
             assert tmpDevAddr = TEST_DEV_ADDR report "Wrong device address received" & LF &
-            "Expected: 0x" & to_hstring(TEST_DEV_ADDR)  & LF &
+            "Expected: 0x" & to_hstring(TEST_DEV_ADDR) & LF &
             "Received: 0x" & to_hstring(tmpDevAddr) severity failure;
-            assert tmpRegAddr = TEST_REG_ADDR report "received register address is not equal" severity failure;
+            assert tmpRegAddr = TEST_REG_ADDR report "received register address is not equal" & LF &
+            "Expected: 0x" & to_hstring(TEST_REG_ADDR) & LF &
+            "Received: 0x" & to_hstring(tmpRegAddr) severity failure;
             assert tmpData = TEST_DATA report "Received wrong data (not equal to what was sent)" & LF &
             "Expected: 0x" & to_hstring(TEST_DATA) & LF &
             "Received: 0x" & to_hstring(tmpData) severity failure;
