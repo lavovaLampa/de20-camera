@@ -11,13 +11,16 @@ FILES += $(LIBS)
 
 # simulator (GHDL) variables
 GHDL_CMD = ghdl
-WAVE_OUT_NAME = wave_out.vcd
+OUT_NAME = wave_out
+VCD_OUT_NAME = $(OUT_NAME).vcd
+GHW_OUT_NAME = $(OUT_NAME).ghw
 WORKDIR = work
 MAKE_OPTS = --std=08
 ANALYSIS_OPTS = --std=08 
 ELABORATE_OPTS = --std=08
 RUN_OPTS = --std=08 -Wunused -Wothers -Wstatic 
-WAVE_OPTS = --vcd=$(WORKDIR)/$(WAVE_OUT_NAME)
+VCD_OPTS = --vcd=$(WORKDIR)/$(VCD_OUT_NAME)
+GHW_OPTS = --wave=$(WORKDIR)/$(GHW_OUT_NAME)
 
 # GHDL file/entity mapping file
 GHDL_LIB_INFO = $(WORKDIR)/work-obj08.cf
@@ -35,18 +38,23 @@ $(WORKDIR) :
 .PHONY : ccd_ctrl
 ccd_ctrl : $(GHDL_LIB_INFO) $(LIBS) $(TB_DIR)/ccd_ctrl_tb.vhd $(SRC_DIR)/ccd_ctrl.vhd
 	$(GHDL_CMD) -m $(ELABORATE_OPTS) --workdir=$(WORKDIR) ccd_ctrl_tb
-	$(GHDL_CMD) -r $(RUN_OPTS) --workdir=$(WORKDIR) ccd_ctrl_tb $(WAVE_OPTS)
+	$(GHDL_CMD) -r $(RUN_OPTS) --workdir=$(WORKDIR) ccd_ctrl_tb $(VCD_OPTS)
 
 .PHONY : color_kernel
 color_kernel : $(GHDL_LIB_INFO) $(LIBS) $(TB_DIR)/color_kernel_tb.vhd $(SRC_DIR)/color_kernel.vhd $(SRC_DIR)/pixel_shiftreg.vhd
 	$(GHDL_CMD) -m $(ELABORATE_OPTS) --workdir=$(WORKDIR) color_kernel_tb
-	$(GHDL_CMD) -r $(RUN_OPTS) --workdir=$(WORKDIR) color_kernel_tb $(WAVE_OPTS)
+	$(GHDL_CMD) -r $(RUN_OPTS) --workdir=$(WORKDIR) color_kernel_tb $(VCD_OPTS)
+
+.PHONY : i2c_ctrl
+i2c_ctrl : $(GHDL_LIB_INFO) $(LIBS) $(TB_DIR)/i2c_ctrl_tb.vhd $(SRC_DIR)/i2c_ctrl.vhd
+	$(GHDL_CMD) -m $(ELABORATE_OPTS) --workdir=$(WORKDIR) i2c_ctrl_tb
+	$(GHDL_CMD) -r $(RUN_OPTS) --workdir=$(WORKDIR) i2c_ctrl_tb $(GHW_OPTS)
 
 .PHONY : show-wave
-show-wave : $(WORKDIR)/$(WAVE_OUT_NAME)
-	$(VIEW_CMD) $(WORKDIR)/$(WAVE_OUT_NAME)
+show-wave : $(WORKDIR)/$(VCD_OUT_NAME)
+	$(VIEW_CMD) $(WORKDIR)/$(VCD_OUT_NAME)
 
 .PHONY : clean
 clean :
 	$(GHDL_CMD) --clean --workdir=$(WORKDIR)
-	rm $(GHDL_LIB_INFO) $(WORKDIR)/$(WAVE_OUT_NAME)
+	rm $(GHDL_LIB_INFO) $(WORKDIR)/wave_out.*
