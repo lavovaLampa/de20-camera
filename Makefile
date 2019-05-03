@@ -1,33 +1,60 @@
-# project name
-PROJECT=bus_led_top
-# vhdl files
-FILES = 
-# testbench
-SIMTOP = led_top_tb
-SIMFILES = testbench/led_top_tb.vhd
-# Simu break condition
-GHDL_SIM_OPT    = --assert-level=error
-#GHDL_SIM_OPT    = --stop-time=500ns
+# where are sources located
+SRC_DIR = src
+TB_DIR = tb
+LIB_DIR = $(SRC_DIR)/common_pkgs
 
-SIMDIR = simu
-SYNTHFILES = bin/bus_led_ise/netgen/synthesis
+# list all sources
+LIBS = $(wildcard $(LIB_DIR)/*.vhd)
+FILES = $(wildcard $(SRC_DIR)/*.vhd)
+FILES += $(wildcard $(TB_DIR)/*.vhd)
+FILES += $(LIBS)
 
-GHDL_CMD        = ghdl
-GHDL_FLAGS      = --ieee=synopsys --warn-no-vital-generic
+# simulator (GHDL) variables
+GHDL_CMD = ghdl
+OUT_NAME = wave_out
+VCD_OUT_NAME = $(OUT_NAME).vcd
+GHW_OUT_NAME = $(OUT_NAME).ghw
+WORKDIR = work
+MAKE_OPTS = --std=08
+ANALYSIS_OPTS = --std=08 
+ELABORATE_OPTS = --std=08
+RUN_OPTS = --std=08 -Wunused -Wothers -Wstatic 
+VCD_OPTS = --vcd=$(WORKDIR)/$(VCD_OUT_NAME)
+GHW_OPTS = --wave=$(WORKDIR)/$(GHW_OUT_NAME)
 
-VIEW_CMD        = /usr/bin/gtkwave
+# GHDL file/entity mapping file
+GHDL_LIB_INFO = $(WORKDIR)/work-obj08.cf
 
-ghdl-compile :                                                                                                 
- mkdir -p simu                                                                                               
- $(GHDL_CMD) -i $(GHDL_FLAGS) --workdir=simu --work=work $(SIMFILES) $(FILES)                                
- $(GHDL_CMD) -m $(GHDL_FLAGS) --workdir=simu --work=work $(SIMTOP)                                           
- @mv $(SIMTOP) simu/$(SIMTOP)                                                                                
-                                                                                                              
-ghdl-run :                                                                                                    
- @$(SIMDIR)/$(SIMTOP) $(GHDL_SIM_OPT) --vcdgz=$(SIMDIR)/$(SIMTOP).vcdgz                                      
-                                                                                                             
-ghdl-view:                                                                                                    
- gunzip --stdout $(SIMDIR)/$(SIMTOP).vcdgz | $(VIEW_CMD) --vcd                                               
-                                                                                                             
-ghdl-clean :                                                                                                  
- $(GHDL_CMD) --clean --workdir=simu     
+# waveform viewer
+VIEW_CMD = gtkwave
+
+# import sources
+$(GHDL_LIB_INFO) : $(FILES) $(WORKDIR)
+	$(GHDL_CMD) -i $(MAKE_OPTS) --workdir=$(WORKDIR) $(SRC_DIR)/*.vhd $(TB_DIR)/*.vhd $(LIB_DIR)/*.vhd
+
+$(WORKDIR) :
+	mkdir $(WORKDIR)
+
+.PHONY : ccd_ctrl
+ccd_ctrl : $(GHDL_LIB_INFO) $(LIBS) $(TB_DIR)/ccd_ctrl_tb.vhd $(SRC_DIR)/ccd_ctrl.vhd
+	$(GHDL_CMD) -m $(ELABORATE_OPTS) --workdir=$(WORKDIR) ccd_ctrl_tb
+	$(GHDL_CMD) -r $(RUN_OPTS) --workdir=$(WORKDIR) ccd_ctrl_tb $(VCD_OPTS)
+
+.PHONY : color_kernel
+color_kernel : $(GHDL_LIB_INFO) $(LIBS) $(TB_DIR)/color_kernel_tb.vhd $(SRC_DIR)/color_kernel.vhd $(SRC_DIR)/pixel_shiftreg.vhd
+	$(GHDL_CMD) -m $(ELABORATE_OPTS) --workdir=$(WORKDIR) color_kernel_tb
+	$(GHDL_CMD) -r $(RUN_OPTS) --workdir=$(WORKDIR) color_kernel_tb $(VCD_OPTS)
+
+.PHONY : i2c_ctrl
+i2c_ctrl : $(GHDL_LIB_INFO) $(LIBS) $(TB_DIR)/i2c_ctrl_tb.vhd $(SRC_DIR)/i2c_ctrl.vhd
+	$(GHDL_CMD) -m $(ELABORATE_OPTS) --workdir=$(WORKDIR) i2c_ctrl_tb
+	$(GHDL_CMD) -r $(RUN_OPTS) --workdir=$(WORKDIR) i2c_ctrl_tb $(GHW_OPTS)
+
+.PHONY : show-wave
+show-wave : $(WORKDIR)/$(VCD_OUT_NAME)
+	$(VIEW_CMD) $(WORKDIR)/$(VCD_OUT_NAME)
+
+.PHONY : clean
+clean :
+	$(GHDL_CMD) --clean --workdir=$(WORKDIR)
+	rm $(GHDL_LIB_INFO) $(WORKDIR)/wave_out.*

@@ -43,7 +43,7 @@ architecture RTL of ccd_ctrl is
     signal color11stage, color12stage : Pipeline_Pixel   := B"0000_0000_00";
     signal color21stage, color22stage : Pipeline_Pixel   := B"0000_0000_00";
     signal color3stage                : Pixel_Data       := B"0000_0000";
-    signal stageColor                 : Pixel_Color      := Green1;
+    signal stageColor                 : Ccd_Pixel_Color  := Green1;
     signal pipelineReady              : boolean          := false;
 
     impure function isImageFringe return boolean is
@@ -105,7 +105,7 @@ begin
     end process shiftProc;
 
     demosaicStage1 : process(clkIn, rstAsyncIn)
-        variable currColor : Pixel_Color := getCurrColor(matrixWidth, matrixHeight);
+        variable currColor : Ccd_Pixel_Color := getCurrColor(matrixWidth, matrixHeight);
     begin
         if rstAsyncIn = '1' then
             pipelineWidth  <= 0;

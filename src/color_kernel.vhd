@@ -2,92 +2,267 @@ library ieee;
 use ieee.std_logic_1164.all;
 use ieee.numeric_std.all;
 use work.ccd_pkg.all;
+use work.kernel_pkg.all;
 
 entity color_kernel is
     generic(
         -- edge detection kernel
-        kernelParams   : Kernel_Params_Arr := (
-            -1, -1, -1,
-            -1, 8, -1,
-            -1, -1, -1
+        kernelParams   : Convolution_Params   := (
+            (-1, -1, -1),
+            (-1, 8, -1),
+            (-1, -1, -1)
         );
-        prescaleAmount : Prescale_Range    := 0
+        prescaleAmount : Convolution_Prescale := 0
     );
     port(
-        clkIn, rstAsyncIn         : in  std_logic;
-        redIn, greenIn, blueIn    : in  Pixel_Data;
-        pixelValidIn              : in  boolean;
-        currXIn                   : in  Img_Width_Range;
-        currYIn                   : in  Img_Height_Range;
-        redOut, greenOut, blueOut : out Pixel_Data;
-        currXOut                  : out Img_Width_Range;
-        currYOut                  : out Img_Height_Range;
-        pixelValidOut             : out boolean
+        clkIn, rstAsyncIn        : in  std_logic;
+        pixelIn                  : in  Pixel_Aggregate;
+        -- true if new pixel available
+        newPixelIn               : in  boolean;
+        -- true if frame ended
+        frameEndIn               : in  boolean;
+        pixelOut                 : out Pixel_Aggregate;
+        newPixelOut, frameEndOut : out boolean
     );
-    type Adder_Tree is record
-        stage1 : Adder_Acc_1;
-        stage2 : Adder_Acc_2;
-        stage3 : Adder_Acc_3;
-    end record Adder_Tree;
 end entity color_kernel;
 
 architecture RTL of color_kernel is
-    -- parallel multiplication register (to enable pipelining)
-    signal mulAcc  : Mul_Acc    := (others => (others => '0'));
-    -- pipelined adder tree
-    signal addTree : Adder_Tree := (stage1 => (others => (others => '0')),
-                                    stage2 => (others => (others => '0')),
-                                    stage3 => (others => (others => '0'))
-                                   );
+    -- pixel shift register OUTPUT
+    signal pixelMatrix : Matrix_Aggregate := (others => (others => (others => X"00"))); -- that's a lOOOOng initialization
+
+    signal pixelCounter    : Pixel_Count_Range := 0;
+    signal currShiftWidth  : Img_Width_Range   := 0;
+    signal currShiftHeight : Img_Height_Range  := 0;
+    
+    signal pixelInBuffer : boolean := false;
+
+    signal stage1Out                                      : Stage_Out(open)(STAGE1_AMOUNT - 1 downto 0);
+    signal stage2Out                                      : Stage_Out(open)(STAGE2_AMOUNT - 1 downto 0);
+    signal stage3Out                                      : Stage_Out(open)(STAGE3_AMOUNT - 1 downto 0);
+    signal stage1Ready, stage2Ready, stage3Ready          : boolean := false;
+    signal stage1FrameEnd, stage2FrameEnd, stage3FrameEnd : boolean := false;
+
+    impure function isImageEdge return boolean is
+    begin
+        return currShiftHeight = 0 or currShiftHeight = IMG_WIDTH - 1 or currShiftWidth = 0 or currShiftWidth = IMG_WIDTH - 1;
+    end function isImageEdge;
+
+    impure function isFrameEnd return boolean is
+    begin
+        return frameEndIn or pixelCounter >= IMG_WIDTH * IMG_HEIGHT;
+    end function isFrameEnd;
 begin
-    kernelProc : process(clkIn, rstAsyncIn)
-        variable tempVal : signed(25 downto 0);
+    shiftProc : process(clkIn, rstAsyncIn)
     begin
         if rstAsyncIn = '1' then
-            mulAcc         <= (others => (others => '0'));
-            addTree.stage1 <= (others => (others => '0'));
-            addTree.stage2 <= (others => (others => '0'));
-            addTree.stage3 <= (others => (others => '0'));
-            tempVal        := (others => '0');
+            currShiftWidth  <= 0;
+            currShiftHeight <= 0;
+            pixelCounter    <= 0;
         elsif rising_edge(clkIn) then
-            if pixelValidIn then
-                for i in dataIn'low to dataIn'high loop
-                    -- signed 13b * signed 9b = signed 21b
-                    mulAcc(i) <= signed(resize(dataIn(i), dataIn(0)'length + 1)) * to_signed(kernelParams(i), KERNEL_PARAMS.data_len);
-                end loop;
+            pixelInBuffer <= newPixelIn;
 
-                for i in mulAcc'low to (mulAcc'high - 1) / 2 loop
-                    -- widen numbers before addition to prevent overflow (21b -> 22b)
-                    addTree.stage1(i) <= widen(mulAcc(2 * i)) + widen(mulAcc((2 * i) + 1));
-                end loop;
-                addTree.stage1(addTree.stage1'high) <= widen(mulAcc(mulAcc'high));
+            -- counter logic
+            if newPixelIn then
+                -- counts received valid pixels in current frame
+                pixelCounter <= pixelCounter + 1;
 
-                for i in addTree.stage1'low to (addTree.stage1'high - 1) / 2 loop
-                    -- widen numbers before addition to prevent overflow (22b -> 23b)
-                    addTree.stage2(i) <= widen(addTree.stage1(2 * i)) + widen(addTree.stage1((2 * i) + 1));
-                end loop;
-                addTree.stage2(addTree.stage2'high) <= widen(addTree.stage1(addTree.stage1'high));
-
-                for i in addTree.stage2'low to (addTree.stage2'high - 1) / 2 loop
-                    -- widen numbers before addition to prevent overflow (23b -> 24b)
-                    addTree.stage3(i) <= widen(addTree.stage2(2 * i)) + widen(addTree.stage2((2 * i) + 1));
-                end loop;
-                addTree.stage3(addTree.stage3'high) <= widen(addTree.stage2(addTree.stage2'high));
-
-                -- widen numbers before addition to prevent overflow (24b -> 25b)
-                tempVal := widen(addTree.stage3(0)) + widen(addTree.stage3(1));
-                -- optional final sum prescaling (division by power of 2)
-                tempVal := tempVal / 2**(abs prescaleAmount);
-                -- optional final sum negation
-                if (prescaleAmount < 0) then
-                    tempVal := -tempVal;
-                else
-                    tempVal := tempVal;
+                -- current width & height of pixel in shift register
+                if pixelCounter > IMG_WIDTH + 1 then
+                    if currShiftWidth >= IMG_WIDTH - 1 then
+                        currShiftWidth  <= 0;
+                        currShiftHeight <= currShiftHeight + 1;
+                    else
+                        currShiftWidth <= currShiftWidth + 1;
+                    end if;
                 end if;
+            end if;
 
-                -- TODO: test this function
-
+            -- reset counters on start of new frame
+            if isFrameEnd then
+                pixelCounter    <= 0;
+                currShiftWidth  <= 0;
+                currShiftHeight <= 0;
             end if;
         end if;
-    end process kernelProc;
+    end process shiftProc;
+
+    convStage1 : process(clkIn, rstAsyncIn)
+        variable leftX, leftY, rightX, rightY    : natural;
+        variable mulAcc, leftMulAcc, rightMulAcc : signed(13 downto 0);
+    begin
+        if rstAsyncIn = '1' then
+            for currColor in Pixel_Color loop
+                for i in 0 to STAGE1_AMOUNT - 1 loop
+                    stage1Out(currColor)(i) <= (others => '0');
+                end loop;
+            end loop;
+            stage1Ready    <= false;
+            stage1FrameEnd <= false;
+        elsif rising_edge(clkIn) then
+            -- propagate new pixel
+            stage1Ready    <= not isImageEdge and pixelInBuffer;
+            stage1FrameEnd <= isFrameEnd;
+
+--            report "Pixel counter: " & natural'image(pixelCounter);
+--            report "Height x Width: " & natural'image(currShiftHeight) & " x " & natural'image(currShiftWidth);
+--            report "Stage Ready: " & boolean'image(stage1Ready);
+--            report "isImageEdge: " & boolean'image(isImageEdge);
+--            report "newPixelIn: " & boolean'image(newPixelIn);
+--            report "pixelInBuffer: " & boolean'image(pixelInBuffer);
+            if not isImageEdge and newPixelIn then
+                for currColor in Pixel_Color loop
+                    --                    report "Current color: " & Pixel_Color'image(currColor);
+                    for i in 0 to STAGE1_AMOUNT - 2 loop
+                        leftY  := i / 3;
+                        rightY := (8 - i) / 3;
+                        leftX  := i mod 3;
+                        rightX := (8 - i) mod 3;
+
+                        leftMulAcc  := signed(resize(pixelMatrix(currColor)(leftY, leftX), PIXEL_SIZE + 1)) * to_signed(kernelParams(leftY, leftX), 5);
+                        rightMulAcc := signed(resize(pixelMatrix(currColor)(rightY, rightX), PIXEL_SIZE + 1)) * to_signed(kernelParams(rightY, rightX), 5);
+
+                        --                        report "left + right VAL: " & integer'image(to_integer(leftMulAcc)) &  " + " & integer'image(to_integer(rightMulAcc));
+
+                        stage1Out(currColor)(i) <= resize(leftMulAcc, PIPELINE_SIZE) + resize(rightMulAcc, PIPELINE_SIZE);
+                    end loop;
+                    mulAcc                  := signed(resize(pixelMatrix(currColor)(1, 1), 9)) * to_signed(kernelParams(1, 1), 5);
+                    --                    report "center VAL: " & integer'image(to_integer(mulAcc)) & LF;
+                    stage1Out(currColor)(4) <= resize(mulAcc, PIPELINE_SIZE);
+                end loop;
+            end if;
+        end if;
+
+    end process convStage1;
+
+    convStage2 : process(clkIn, rstAsyncIn)
+    begin
+        if rstAsyncIn = '1' then
+            for currColor in Pixel_Color loop
+                for i in 0 to STAGE2_AMOUNT - 1 loop
+                    stage2Out(currColor)(i) <= (others => '0');
+                end loop;
+            end loop;
+            stage2Ready    <= false;
+            stage2FrameEnd <= false;
+        elsif rising_edge(clkIn) then
+            -- propagate new pixel
+            stage2Ready    <= stage1Ready;
+            stage2FrameEnd <= stage1FrameEnd;
+
+            if stage1Ready then
+                for currColor in Pixel_Color loop
+                    --                    report "STAGE2" & LF & "Current color: " & Pixel_Color'image(currColor);
+                    for i in 0 to STAGE2_AMOUNT - 2 loop
+                        stage2Out(currColor)(i) <= stage1Out(currColor)(i) + stage1Out(currColor)(STAGE1_AMOUNT - 1 - i);
+                        --                        report "left + right VAL: " & integer'image(to_integer(stage1Out(currColor)(i))) &  " + " & integer'image(to_integer(stage1Out(currColor)(STAGE1_AMOUNT - 1 -i)));
+                        --                        report "out VAL: " & integer'image(to_integer(stage1Out(currColor)(i) + stage1Out(currColor)(STAGE1_AMOUNT - 1 - i)));
+                    end loop;
+                    stage2Out(currColor)(2) <= stage1Out(currColor)(2);
+                    --                    report "center VAL: " & integer'image(to_integer(stage1Out(currColor)(2))) & LF;
+                end loop;
+            end if;
+        end if;
+    end process convStage2;
+
+    convStage3 : process(clkIn, rstAsyncIn)
+    begin
+        if rstAsyncIn = '1' then
+            for currColor in Pixel_Color loop
+                for i in 0 to STAGE3_AMOUNT - 1 loop
+                    stage3Out(currColor)(i) <= (others => '0');
+                end loop;
+            end loop;
+            stage3Ready    <= false;
+            stage3FrameEnd <= false;
+        elsif rising_edge(clkIn) then
+            -- propagate new pixel
+            stage3Ready    <= stage2Ready;
+            stage3FrameEnd <= stage2FrameEnd;
+
+            if stage2Ready then
+                for currColor in Pixel_Color loop
+                    --                    report "STAGE3" & LF & "Current color: " & Pixel_Color'image(currColor);
+                    for i in 0 to STAGE3_AMOUNT - 2 loop
+                        stage3Out(currColor)(i) <= stage2Out(currColor)(i) + stage2Out(currColor)(STAGE2_AMOUNT - 1 - i);
+                        --                        report "left + right VAL: " & integer'image(to_integer(stage2Out(currColor)(i))) &  " + " & integer'image(to_integer(stage2Out(currColor)(STAGE2_AMOUNT - 1 -i)));
+                    end loop;
+                    stage3Out(currColor)(1) <= stage2Out(currColor)(1);
+                    --                    report "center VAL: " & integer'image(to_integer(stage2Out(currColor)(1))) & LF;
+                end loop;
+            end if;
+        end if;
+    end process convStage3;
+
+    convStage4 : process(clkIn, rstAsyncIn)
+        variable tmp         : Pipeline_Pixel := (others => '0');
+        variable tmpUnsigned : Pixel_Data     := X"00";
+    begin
+        if rstAsyncIn = '1' then
+            for currColor in Pixel_Color loop
+                pixelOut(currColor) <= X"00";
+            end loop;
+            newPixelOut <= false;
+            frameEndOut <= false;
+        elsif rising_edge(clkIn) then
+            -- propagate new pixel
+            newPixelOut <= stage3Ready;
+            frameEndOut <= stage3FrameEnd;
+
+            if stage3Ready then
+                for currColor in Pixel_Color loop
+                    tmp         := stage3Out(currColor)(0) + stage3Out(currColor)(1);
+                    --                    report "Before PreScale: " & integer'image(to_integer(tmp)) severity note;
+                    tmp         := tmp / (2 ** prescaleAmount);
+                    --                    report "After PreScale: " & integer'image(to_integer(tmp)) severity note;
+                    tmpUnsigned := toSaturatedUnsigned(tmp, IMG_CONSTS.pixel_data_size);
+
+                    -- convert back to unsigned, we can be sure the number is correct unsigned value because of IF block
+                    pixelOut(currColor) <= tmpUnsigned;
+                end loop;
+            end if;
+        end if;
+    end process convStage4;
+
+    redShiftReg : entity work.pixel_shiftreg
+        generic map(
+            SHIFT_LEN  => (2 * IMG_WIDTH) + 3,
+            LINE_WIDTH => IMG_WIDTH
+        )
+        port map(
+            clkIn      => clkIn,
+            rstAsyncIn => rstAsyncIn,
+            -- TODO: parametrize
+            dataIn     => pixelIn(Red),
+            enableIn   => newPixelIn,
+            pixelsOut  => pixelMatrix(Red)
+        );
+
+    greenShiftReg : entity work.pixel_shiftreg
+        generic map(
+            SHIFT_LEN  => (2 * IMG_WIDTH) + 3,
+            LINE_WIDTH => IMG_WIDTH
+        )
+        port map(
+            clkIn      => clkIn,
+            rstAsyncIn => rstAsyncIn,
+            -- TODO: parametrize
+            dataIn     => pixelIn(Green),
+            enableIn   => newPixelIn,
+            pixelsOut  => pixelMatrix(Green)
+        );
+
+    blueShiftReg : entity work.pixel_shiftreg
+        generic map(
+            SHIFT_LEN  => (2 * IMG_WIDTH) + 3,
+            LINE_WIDTH => IMG_WIDTH
+        )
+        port map(
+            clkIn      => clkIn,
+            rstAsyncIn => rstAsyncIn,
+            -- TODO: parametrize
+            dataIn     => pixelIn(Blue),
+            enableIn   => newPixelIn,
+            pixelsOut  => pixelMatrix(Blue)
+        );
+
 end architecture RTL;
