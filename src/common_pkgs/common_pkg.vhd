@@ -19,17 +19,17 @@ package common_pkg is
 
     type Image_Properties is record
         -- from which column are we starting readout
-        width_start     : CCD_WIDTH;
+        width_start  : CCD_WIDTH;
         -- from which row are we starting readout
-        height_start    : CCD_HEIGHT;
+        height_start : CCD_HEIGHT;
         -- image height (including pixels only used to avoid fringing)
-        height          : CCD_HEIGHT;
+        height       : CCD_HEIGHT;
         -- image width (including pixels only used to avoid fringing)
-        width           : CCD_WIDTH;
+        width        : CCD_WIDTH;
         -- is chip outputting pixels mirrored
-        is_mirrored     : boolean;
+        is_mirrored  : boolean;
         -- how much pixel data do we really use/need
-        pixel_data_size : positive;
+        pixel_size   : positive;
     end record Image_Properties;
 
     constant CCD_CONSTS : Ccd_Properties := (
@@ -50,21 +50,22 @@ package common_pkg is
     --    );
 
     constant IMG_CONSTS : Image_Properties := (
-        width_start     => 1053,
-        height_start    => 758,
-        height          => 64,
-        width           => 84,
-        is_mirrored     => false,
-        pixel_data_size => 8
+        width_start  => 1053,
+        height_start => 758,
+        height       => 64,
+        width        => 84,
+        is_mirrored  => false,
+        pixel_size   => 8
     );
 
     subtype Img_Height_Range is natural range 0 to IMG_CONSTS.height - 1;
     subtype Img_Width_Range is natural range 0 to IMG_CONSTS.width - 1;
 
     -- INTERNAL TYPES
-    subtype Pixel_Data is unsigned((IMG_CONSTS.pixel_data_size - 1) downto 0);
+    subtype Pixel_Data is unsigned((IMG_CONSTS.pixel_size - 1) downto 0);
     subtype Pixel_Count_Range is natural range 0 to (IMG_CONSTS.width * IMG_CONSTS.height);
     type Pixel_Color is (Red, Green, Blue);
     type Pixel_Aggregate is array (Pixel_Color) of Pixel_Data;
     type Pixel_Matrix is array (2 downto 0, 2 downto 0) of Pixel_Data;
+
 end package common_pkg;

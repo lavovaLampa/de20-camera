@@ -4,6 +4,13 @@ use ieee.numeric_std.all;
 use work.common_pkg.all;
 
 package ccd_pkg is
+    alias IMG_WIDTH is IMG_CONSTS.width;
+    alias IMG_HEIGHT is IMG_CONSTS.height;
+
+    -- pipeline stage has to be wide enough not to overflow during addition
+    constant PIPELINE_SIZE : natural := IMG_CONSTS.pixel_size + 2;
+
+    subtype Pixel_Range is natural range IMG_CONSTS.pixel_size - 1 downto 0;
 
     -- CCD TYPES
     subtype Ccd_Pixel_Data is std_logic_vector((CCD_CONSTS.data_len - 1) downto 0);
@@ -11,8 +18,6 @@ package ccd_pkg is
     type Ccd_Pixel_Color is (Red, Green1, Green2, Blue);
 
     -- PIPELINE TYPES
-    constant PIPELINE_SIZE : natural := IMG_CONSTS.pixel_data_size + 2;
-    -- pipeline stage has to be wide enough not to overflow during addition
     subtype Pipeline_Pixel is unsigned(PIPELINE_SIZE - 1 downto 0);
     type Stage_Out is array (1 downto 0) of Pipeline_Pixel;
     type Pipeline_Matrix is array (2 downto 0, 2 downto 0) of Pipeline_Pixel;

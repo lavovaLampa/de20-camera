@@ -211,7 +211,7 @@ begin
                     --                    report "Before PreScale: " & integer'image(to_integer(tmp)) severity note;
                     tmp         := tmp / (2 ** prescaleAmount);
                     --                    report "After PreScale: " & integer'image(to_integer(tmp)) severity note;
-                    tmpUnsigned := toSaturatedUnsigned(tmp, IMG_CONSTS.pixel_data_size);
+                    tmpUnsigned := toSaturatedUnsigned(tmp, IMG_CONSTS.pixel_size);
 
                     -- convert back to unsigned, we can be sure the number is correct unsigned value because of IF block
                     pixelOut(currColor) <= tmpUnsigned;

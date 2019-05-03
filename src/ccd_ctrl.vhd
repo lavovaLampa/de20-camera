@@ -12,10 +12,6 @@ entity ccd_ctrl is
         pixelOut                   : out Pixel_Aggregate;
         pixelValidOut, frameEndOut : out boolean
     );
-    alias IMG_WIDTH is IMG_CONSTS.width;
-    alias IMG_HEIGHT is IMG_CONSTS.height;
-    alias PIXEL_SIZE is IMG_CONSTS.pixel_data_size;
-    subtype Pixel_Range is natural range PIXEL_SIZE - 1 downto 0;
 end entity ccd_ctrl;
 
 architecture RTL of ccd_ctrl is

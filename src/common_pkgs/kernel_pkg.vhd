@@ -5,7 +5,7 @@ use work.common_pkg.all;
 
 package kernel_pkg is
     -- ALIASES
-    alias PIXEL_SIZE is IMG_CONSTS.pixel_data_size;
+    alias PIXEL_SIZE is IMG_CONSTS.pixel_size;
 
     -- CONSTANTS
     constant PIPELINE_STAGE_AMOUNT : natural := 4;

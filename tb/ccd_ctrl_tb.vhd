@@ -11,9 +11,7 @@ use work.common_pkg.all;
 use work.ccd_ctrl;
 
 entity ccd_ctrl_tb is
-    alias IMG_WIDTH is IMG_CONSTS.width;
-    alias IMG_HEIGHT is IMG_CONSTS.height;
-    alias PIXEL_SIZE is IMG_CONSTS.pixel_data_size;
+    alias PIXEL_SIZE is IMG_CONSTS.pixel_size;
     constant PIPELINE_SIZE : natural := PIXEL_SIZE + 2;
     -- pipeline stage has to be wide enough not to overflow during addition
     subtype Pipeline_Pixel is unsigned(PIPELINE_SIZE - 1 downto 0);
@@ -21,28 +19,23 @@ entity ccd_ctrl_tb is
     -- image value accumulator (we have to remember to check if pixels were computed successfully)
     type Ccd_Image_Acc is array (0 to IMG_HEIGHT - 1, 0 to IMG_WIDTH - 1) of Ccd_Pixel_Data;
 
-    constant CLK_PERIOD : time := 20 ns; -- 50 MHz clock
-
+    constant CLK_PERIOD       : time     := 20 ns; -- 50 MHz clock
+    constant TEST_FRAME_COUNT : natural  := 2;
     -- real constants are way higher
     -- TODO: consult documentation
-    constant HBLANK_CLKS : positive := 5;
-    constant VBLANK_CLKS : positive := 10;
+    constant TEST_HBLANK_CLKS : positive := 5;
+    constant TEST_VBLANK_CLKS : positive := 10;
+
 end ccd_ctrl_tb;
 
 architecture test of ccd_ctrl_tb is
 
     -- dut interfacing signals
-    signal clkIn         : std_logic      := '0';
-    signal rstAsyncIn    : std_logic      := '0';
-    signal frameValidIn  : std_logic      := '0';
-    signal lineValidIn   : std_logic      := '0';
-    signal pixelDataIn   : ccd_pixel_data := X"000";
-    signal redOut        : pixel_data;
-    signal greenOut      : pixel_data;
-    signal blueOut       : pixel_data;
-    signal currXOut      : img_width_range;
-    signal currYOut      : img_height_range;
-    signal pixelValidOut : boolean;
+    signal clkIn, rstAsyncIn          : std_logic      := '0';
+    signal frameValidIn, lineValidIn  : std_logic      := '0';
+    signal pixelDataIn                : ccd_pixel_data := X"000";
+    signal pixelOut                   : Pixel_Aggregate;
+    signal pixelValidOut, frameEndOut : boolean;
 
     -- testbench signals
     signal tbClock    : std_logic := '0';
@@ -57,6 +50,9 @@ architecture test of ccd_ctrl_tb is
     end function matrixToPixel;
 
 begin
+    -- Clock generation
+    tbClock <= not tbClock after CLK_PERIOD / 2 when tbSimEnded /= '1' else '0';
+    clkIn   <= tbClock;
 
     dut : entity ccd_ctrl
         port map(clkIn         => clkIn,
@@ -64,13 +60,9 @@ begin
                  frameValidIn  => frameValidIn,
                  lineValidIn   => lineValidIn,
                  pixelDataIn   => pixelDataIn,
-                 currWidthOut  => currXOut,
-                 currHeightOut => currYOut,
+                 pixelOut      => pixelOut,
+                 frameEndOut   => frameEndOut,
                  pixelValidOut => pixelValidOut);
-
-    -- Clock generation
-    tbClock <= not tbClock after CLK_PERIOD / 2 when tbSimEnded /= '1' else '0';
-    clkIn   <= tbClock;
 
     stimuli : process
         variable pixelDataAcc : Ccd_Pixel_Data;
@@ -99,10 +91,10 @@ begin
                 wait until falling_edge(clkIn);
                 lineValidIn <= '0';
                 pixelDataIn <= X"000";
-                wait for HBLANK_CLKS * CLK_PERIOD;
+                wait for TEST_HBLANK_CLKS * CLK_PERIOD;
             end loop;
             frameValidIn <= '0';
-            wait for VBLANK_CLKS * CLK_PERIOD;
+            wait for TEST_VBLANK_CLKS * CLK_PERIOD;
         end loop;
 
         -- Stop the clock and hence terminate the simulation

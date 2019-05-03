@@ -130,7 +130,7 @@ begin
                         end loop;
                     end loop;
                     pixelAcc := pixelAcc / (2 ** TEST_PRESCALE);
-                    tmpPixel := toSaturatedUnsigned(pixelAcc, IMG_CONSTS.pixel_data_size);
+                    tmpPixel := toSaturatedUnsigned(pixelAcc, IMG_CONSTS.pixel_size);
 
                     assert tmpPixel = pixelOut(currColor) report "Received wrong pixel value" & LF &
                     "Expected: " & integer'image(to_integer(tmpPixel)) & LF &
