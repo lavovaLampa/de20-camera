@@ -104,9 +104,9 @@ package common_pkg is
         (X"0A", X"8000"),
         -- enable row & column mirroring
         (X"20", MIRROR_SWITCH(IMG_CONSTS.is_mirrored)),
-        -- row address mode (binning, skipping)
+        -- row address mode (binning, skipping) [NO BIN, NO SKIP]
         (X"22", X"0000"),
-        -- column address mode (binning, skipping)
+        -- column address mode (binning, skipping) [NO BIN, NO SKIP]
         (X"23", X"0000"),
         -- Green1 gain
         (X"2B", X"000B"),
@@ -117,7 +117,7 @@ package common_pkg is
         -- Green2 gain
         (X"2E", X"000B"),
         -- TEST PATTERNS
-        -- test pattern control
+        -- test pattern control (on/off + type of pattern)
         (X"A0", TEST_PATTERN_SWITCH(IMG_CONSTS.test_pattern)),
         -- test pattern green intensity
         (X"A1", X"00FF"),
