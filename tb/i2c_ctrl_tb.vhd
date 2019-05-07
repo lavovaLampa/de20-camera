@@ -16,8 +16,7 @@ end i2c_ctrl_tb;
 
 architecture tb of i2c_ctrl_tb is
 
-    signal clkIn             : std_logic := '0';
-    signal rstAsyncIn        : std_logic := '0';
+    signal clkIn, rstAsyncIn : std_logic := '0';
     signal enableIn          : boolean   := false;
     signal dataIn            : i2c_data  := X"0000";
     signal devAddrIn         : i2c_addr  := X"00";

@@ -1,13 +1,11 @@
 library ieee;
 use ieee.std_logic_1164.all;
 use ieee.numeric_std.all;
-use work.ccd_pkg.IMG_CONSTS;
-use work.ccd_pkg.Pixel_Color;
-use work.ccd_pkg.Pixel_Matrix;
+use work.common_pkg.all;
 
 package kernel_pkg is
     -- ALIASES
-    alias PIXEL_SIZE is IMG_CONSTS.pixel_data_size;
+    alias PIXEL_SIZE is IMG_CONSTS.pixel_size;
 
     -- CONSTANTS
     constant PIPELINE_STAGE_AMOUNT : natural := 4;

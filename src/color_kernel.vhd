@@ -1,7 +1,7 @@
 library ieee;
 use ieee.std_logic_1164.all;
 use ieee.numeric_std.all;
-use work.ccd_pkg.all;
+use work.common_pkg.all;
 use work.kernel_pkg.all;
 
 entity color_kernel is
@@ -17,10 +17,7 @@ entity color_kernel is
     port(
         clkIn, rstAsyncIn        : in  std_logic;
         pixelIn                  : in  Pixel_Aggregate;
-        -- true if new pixel available
-        newPixelIn               : in  boolean;
-        -- true if frame ended
-        frameEndIn               : in  boolean;
+        newPixelIn, frameEndIn   : in  boolean;
         pixelOut                 : out Pixel_Aggregate;
         newPixelOut, frameEndOut : out boolean
     );
@@ -33,7 +30,7 @@ architecture RTL of color_kernel is
     signal pixelCounter    : Pixel_Count_Range := 0;
     signal currShiftWidth  : Img_Width_Range   := 0;
     signal currShiftHeight : Img_Height_Range  := 0;
-    
+
     signal pixelInBuffer : boolean := false;
 
     signal stage1Out                                      : Stage_Out(open)(STAGE1_AMOUNT - 1 downto 0);
@@ -103,12 +100,12 @@ begin
             stage1Ready    <= not isImageEdge and pixelInBuffer;
             stage1FrameEnd <= isFrameEnd;
 
---            report "Pixel counter: " & natural'image(pixelCounter);
---            report "Height x Width: " & natural'image(currShiftHeight) & " x " & natural'image(currShiftWidth);
---            report "Stage Ready: " & boolean'image(stage1Ready);
---            report "isImageEdge: " & boolean'image(isImageEdge);
---            report "newPixelIn: " & boolean'image(newPixelIn);
---            report "pixelInBuffer: " & boolean'image(pixelInBuffer);
+            --            report "Pixel counter: " & natural'image(pixelCounter);
+            --            report "Height x Width: " & natural'image(currShiftHeight) & " x " & natural'image(currShiftWidth);
+            --            report "Stage Ready: " & boolean'image(stage1Ready);
+            --            report "isImageEdge: " & boolean'image(isImageEdge);
+            --            report "newPixelIn: " & boolean'image(newPixelIn);
+            --            report "pixelInBuffer: " & boolean'image(pixelInBuffer);
             if not isImageEdge and newPixelIn then
                 for currColor in Pixel_Color loop
                     --                    report "Current color: " & Pixel_Color'image(currColor);
@@ -214,7 +211,7 @@ begin
                     --                    report "Before PreScale: " & integer'image(to_integer(tmp)) severity note;
                     tmp         := tmp / (2 ** prescaleAmount);
                     --                    report "After PreScale: " & integer'image(to_integer(tmp)) severity note;
-                    tmpUnsigned := toSaturatedUnsigned(tmp, IMG_CONSTS.pixel_data_size);
+                    tmpUnsigned := toSaturatedUnsigned(tmp, IMG_CONSTS.pixel_size);
 
                     -- convert back to unsigned, we can be sure the number is correct unsigned value because of IF block
                     pixelOut(currColor) <= tmpUnsigned;
