@@ -100,12 +100,6 @@ begin
             stage1Ready    <= not isImageEdge and pixelInBuffer;
             stage1FrameEnd <= isFrameEnd;
 
-            --            report "Pixel counter: " & natural'image(pixelCounter);
-            --            report "Height x Width: " & natural'image(currShiftHeight) & " x " & natural'image(currShiftWidth);
-            --            report "Stage Ready: " & boolean'image(stage1Ready);
-            --            report "isImageEdge: " & boolean'image(isImageEdge);
-            --            report "newPixelIn: " & boolean'image(newPixelIn);
-            --            report "pixelInBuffer: " & boolean'image(pixelInBuffer);
             if not isImageEdge and newPixelIn then
                 for currColor in Pixel_Color loop
                     --                    report "Current color: " & Pixel_Color'image(currColor);
@@ -118,12 +112,9 @@ begin
                         leftMulAcc  := signed(resize(pixelMatrix(currColor)(leftY, leftX), PIXEL_SIZE + 1)) * to_signed(kernelParams(leftY, leftX), 5);
                         rightMulAcc := signed(resize(pixelMatrix(currColor)(rightY, rightX), PIXEL_SIZE + 1)) * to_signed(kernelParams(rightY, rightX), 5);
 
-                        --                        report "left + right VAL: " & integer'image(to_integer(leftMulAcc)) &  " + " & integer'image(to_integer(rightMulAcc));
-
                         stage1Out(currColor)(i) <= resize(leftMulAcc, PIPELINE_SIZE) + resize(rightMulAcc, PIPELINE_SIZE);
                     end loop;
                     mulAcc                  := signed(resize(pixelMatrix(currColor)(1, 1), 9)) * to_signed(kernelParams(1, 1), 5);
-                    --                    report "center VAL: " & integer'image(to_integer(mulAcc)) & LF;
                     stage1Out(currColor)(4) <= resize(mulAcc, PIPELINE_SIZE);
                 end loop;
             end if;
@@ -148,14 +139,10 @@ begin
 
             if stage1Ready then
                 for currColor in Pixel_Color loop
-                    --                    report "STAGE2" & LF & "Current color: " & Pixel_Color'image(currColor);
                     for i in 0 to STAGE2_AMOUNT - 2 loop
                         stage2Out(currColor)(i) <= stage1Out(currColor)(i) + stage1Out(currColor)(STAGE1_AMOUNT - 1 - i);
-                        --                        report "left + right VAL: " & integer'image(to_integer(stage1Out(currColor)(i))) &  " + " & integer'image(to_integer(stage1Out(currColor)(STAGE1_AMOUNT - 1 -i)));
-                        --                        report "out VAL: " & integer'image(to_integer(stage1Out(currColor)(i) + stage1Out(currColor)(STAGE1_AMOUNT - 1 - i)));
                     end loop;
                     stage2Out(currColor)(2) <= stage1Out(currColor)(2);
-                    --                    report "center VAL: " & integer'image(to_integer(stage1Out(currColor)(2))) & LF;
                 end loop;
             end if;
         end if;
@@ -178,13 +165,10 @@ begin
 
             if stage2Ready then
                 for currColor in Pixel_Color loop
-                    --                    report "STAGE3" & LF & "Current color: " & Pixel_Color'image(currColor);
                     for i in 0 to STAGE3_AMOUNT - 2 loop
                         stage3Out(currColor)(i) <= stage2Out(currColor)(i) + stage2Out(currColor)(STAGE2_AMOUNT - 1 - i);
-                        --                        report "left + right VAL: " & integer'image(to_integer(stage2Out(currColor)(i))) &  " + " & integer'image(to_integer(stage2Out(currColor)(STAGE2_AMOUNT - 1 -i)));
                     end loop;
                     stage3Out(currColor)(1) <= stage2Out(currColor)(1);
-                    --                    report "center VAL: " & integer'image(to_integer(stage2Out(currColor)(1))) & LF;
                 end loop;
             end if;
         end if;
@@ -208,9 +192,7 @@ begin
             if stage3Ready then
                 for currColor in Pixel_Color loop
                     tmp         := stage3Out(currColor)(0) + stage3Out(currColor)(1);
-                    --                    report "Before PreScale: " & integer'image(to_integer(tmp)) severity note;
                     tmp         := tmp / (2 ** prescaleAmount);
-                    --                    report "After PreScale: " & integer'image(to_integer(tmp)) severity note;
                     tmpUnsigned := toSaturatedUnsigned(tmp, IMG_CONSTS.pixel_size);
 
                     -- convert back to unsigned, we can be sure the number is correct unsigned value because of IF block
