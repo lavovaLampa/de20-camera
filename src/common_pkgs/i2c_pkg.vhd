@@ -20,7 +20,6 @@ package i2c_pkg is
     constant CCD_WRITE_ADDR : I2c_Addr := X"BA";
 
     type FSM_State is (Ready, SendData, ReleaseLine, WaitForAck, SendStop);
-    type ACK_State is (WaitForAck, ReleaseLine, ReadAck);
 
     pure function logicToI2CBusState(val : std_logic) return std_logic;
     pure function i2cBusStateToLogic(val : std_logic) return std_logic;

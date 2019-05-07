@@ -7,7 +7,6 @@ package common_pkg is
     subtype CCD_HEIGHT is natural range 0 to 2001;
 
     type Ccd_Properties is record
-        -- including boundary region to eliminate errors when convoluting border pixels (size -> 1 row/col on either img side)
         width         : positive;
         height        : positive;
         -- true active image size (excluding boundary region, dark region)
@@ -15,16 +14,20 @@ package common_pkg is
         active_height : positive;
         -- length of pixel data vector
         data_len      : positive;
+        -- number of PIXCLKs
+        hblank        : positive;
+        -- number of lines
+        vblank        : positive;
     end record Ccd_Properties;
 
     type Image_Properties is record
-        -- from which column are we starting readout
+        -- the X coordinate of the upper-left corner of FOV -> EVEN (rounded down)
         width_start  : CCD_WIDTH;
-        -- from which row are we starting readout
+        -- the Y coordinate of the upper-left corner of FOV -> EVEN (rounded down)
         height_start : CCD_HEIGHT;
-        -- image height (including pixels only used to avoid fringing)
+        -- height of the FOV - 1 -> ODD (rounded up)
         height       : CCD_HEIGHT;
-        -- image width (including pixels only used to avoid fringing)
+        -- width of the FOV - 1 -> ODD (rounded up)
         width        : CCD_WIDTH;
         -- is chip outputting pixels mirrored
         is_mirrored  : boolean;
@@ -37,7 +40,9 @@ package common_pkg is
         height        => 2002,
         active_width  => 2592,
         active_height => 1944,
-        data_len      => 12
+        data_len      => 12,
+        hblank        => 768,
+        vblank        => 8
     );
 
     --    constant IMG_CONSTS : Image_Properties := (
@@ -50,7 +55,7 @@ package common_pkg is
     --    );
 
     constant IMG_CONSTS : Image_Properties := (
-        width_start  => 1053,
+        width_start  => 1052,
         height_start => 758,
         height       => 64,
         width        => 84,

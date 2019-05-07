@@ -38,7 +38,7 @@ $(WORKDIR) :
 .PHONY : ccd_ctrl
 ccd_ctrl : $(GHDL_LIB_INFO) $(LIBS) $(TB_DIR)/ccd_ctrl_tb.vhd $(SRC_DIR)/ccd_ctrl.vhd
 	$(GHDL_CMD) -m $(ELABORATE_OPTS) --workdir=$(WORKDIR) ccd_ctrl_tb
-	$(GHDL_CMD) -r $(RUN_OPTS) --workdir=$(WORKDIR) ccd_ctrl_tb $(VCD_OPTS)
+	$(GHDL_CMD) -r $(RUN_OPTS) --workdir=$(WORKDIR) ccd_ctrl_tb $(GHW_OPTS)
 
 .PHONY : color_kernel
 color_kernel : $(GHDL_LIB_INFO) $(LIBS) $(TB_DIR)/color_kernel_tb.vhd $(SRC_DIR)/color_kernel.vhd $(SRC_DIR)/pixel_shiftreg.vhd

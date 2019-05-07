@@ -62,8 +62,6 @@ begin
                 -- counts received valid pixels in current frame
                 pixelCounter <= pixelCounter + 1;
 
-                hasNewPixel <= true;
-
                 -- current width & height of pixel in shift register
                 if pixelCounter > IMG_WIDTH + 1 then
                     if currShiftWidth >= IMG_WIDTH - 1 then
@@ -110,42 +108,44 @@ begin
             end loop;
 
             -- demosaicing (first pipeline stage)
-            if currColor = Red then
-                -- green
-                color1Out(0) <= resizedMatrix(0, 1) + resizedMatrix(1, 0);
-                color1Out(1) <= resizedMatrix(1, 2) + resizedMatrix(2, 1);
-                -- blue
-                color2Out(0) <= resizedMatrix(0, 0) + resizedMatrix(0, 2);
-                color2Out(1) <= resizedMatrix(2, 0) + resizedMatrix(2, 2);
-                -- red
-                color3Out    <= pixelMatrix(1, 1);
-            elsif currColor = Blue then
-                -- green
-                color1Out(0) <= resizedMatrix(0, 1) + resizedMatrix(1, 0);
-                color1Out(1) <= resizedMatrix(1, 2) + resizedMatrix(2, 1);
-                -- red
-                color2Out(0) <= resizedMatrix(0, 0) + resizedMatrix(0, 2);
-                color2Out(1) <= resizedMatrix(2, 0) + resizedMatrix(2, 2);
-                -- blue
-                color3Out    <= pixelMatrix(1, 1);
-            elsif currColor = Green1 then
-                -- red
-                color1Out(0) <= resizedMatrix(1, 0) + resizedMatrix(1, 2);
-                -- blue
-                color2Out(0) <= resizedMatrix(0, 1) + resizedMatrix(2, 1);
-                -- green
-                color3Out    <= pixelMatrix(1, 1);
-            elsif currColor = Green2 then
-                -- blue
-                color1Out(0) <= resizedMatrix(1, 0) + resizedMatrix(1, 2);
-                -- red
-                color2Out(0) <= resizedMatrix(0, 1) + resizedMatrix(2, 1);
-                -- green
-                color3Out    <= pixelMatrix(1, 1);
-            else
-                report "this should not happen" severity failure;
-            end if;
+            case currColor is
+                when Red =>
+                    -- green
+                    color1Out(0) <= resizedMatrix(0, 1) + resizedMatrix(1, 0);
+                    color1Out(1) <= resizedMatrix(1, 2) + resizedMatrix(2, 1);
+                    -- blue
+                    color2Out(0) <= resizedMatrix(0, 0) + resizedMatrix(0, 2);
+                    color2Out(1) <= resizedMatrix(2, 0) + resizedMatrix(2, 2);
+                    -- red
+                    color3Out    <= pixelMatrix(1, 1);
 
+                when Blue =>
+                    -- green
+                    color1Out(0) <= resizedMatrix(0, 1) + resizedMatrix(1, 0);
+                    color1Out(1) <= resizedMatrix(1, 2) + resizedMatrix(2, 1);
+                    -- red
+                    color2Out(0) <= resizedMatrix(0, 0) + resizedMatrix(0, 2);
+                    color2Out(1) <= resizedMatrix(2, 0) + resizedMatrix(2, 2);
+                    -- blue
+                    color3Out    <= pixelMatrix(1, 1);
+
+                when Green1 =>
+                    -- red
+                    color1Out(0) <= resizedMatrix(1, 0) + resizedMatrix(1, 2);
+                    -- blue
+                    color2Out(0) <= resizedMatrix(0, 1) + resizedMatrix(2, 1);
+                    -- green
+                    color3Out    <= pixelMatrix(1, 1);
+
+                when Green2 =>
+                    -- blue
+                    color1Out(0) <= resizedMatrix(1, 0) + resizedMatrix(1, 2);
+                    -- red
+                    color2Out(0) <= resizedMatrix(0, 1) + resizedMatrix(2, 1);
+                    -- green
+                    color3Out    <= pixelMatrix(1, 1);
+
+            end case;
         end if;
     end process demosaicStage1;
 

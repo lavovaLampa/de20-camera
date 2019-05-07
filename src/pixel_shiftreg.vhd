@@ -5,7 +5,7 @@ use work.common_pkg.all;
 
 entity pixel_shiftreg is
     generic(
-        SHIFT_LEN : natural := (IMG_CONSTS.width * 2) + 3;
+        SHIFT_LEN  : natural := (IMG_CONSTS.width * 2) + 3;
         LINE_WIDTH : natural := IMG_CONSTS.width
     );
     port(
@@ -17,7 +17,7 @@ entity pixel_shiftreg is
 
     -- constant SHIFT_LEN : natural := (IMG_CONSTS.width * 2) + 3;
     type Color_ShiftReg_Array is array (SHIFT_LEN - 1 downto 0) of Pixel_Data;
---    alias WIDTH is IMG_CONSTS.width;
+    --    alias WIDTH is IMG_CONSTS.width;
 end entity pixel_shiftreg;
 
 architecture RTL of pixel_shiftreg is
