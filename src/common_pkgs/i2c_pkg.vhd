@@ -12,12 +12,12 @@ package i2c_pkg is
     subtype Addr_Range is natural range ADDR_WIDTH - 1 downto 0;
     subtype Data_Aggregate_Range is natural range AGGREGATE_WIDTH - 1 downto 0;
 
-    subtype I2c_Data is std_logic_vector(Data_Range);
-    subtype I2c_Addr is std_logic_vector(Addr_Range);
-    subtype I2c_Aggregate is std_logic_vector(Data_Aggregate_Range);
+    subtype I2C_Data is std_logic_vector(Data_Range);
+    subtype I2C_Addr is std_logic_vector(Addr_Range);
+    subtype I2C_Aggregate is std_logic_vector(Data_Aggregate_Range);
 
-    constant CCD_READ_ADDR  : I2c_Addr := X"BB";
-    constant CCD_WRITE_ADDR : I2c_Addr := X"BA";
+    constant CCD_READ_ADDR  : I2C_Addr := X"BB";
+    constant CCD_WRITE_ADDR : I2C_Addr := X"BA";
 
     type FSM_State is (Ready, SendData, ReleaseLine, WaitForAck, SendStop);
 

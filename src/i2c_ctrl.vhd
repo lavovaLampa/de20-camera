@@ -12,8 +12,8 @@ entity i2c_ctrl is
         clkIn, rstAsyncIn     : in    std_logic;
         -- DATA IN
         enableIn              : in    boolean;
-        dataIn                : in    I2c_Data;
-        devAddrIn, dataAddrIn : in    I2c_Addr;
+        dataIn                : in    I2C_Data;
+        devAddrIn, dataAddrIn : in    I2C_Addr;
         -- DATA OUT
         doneOut, errorOut     : out   boolean   := false;
         -- I2C COMMS
@@ -27,7 +27,7 @@ architecture behavioral of i2c_ctrl is
     signal fsmState      : FSM_State            := Ready;
     -- data/addr array pointer
     signal currBit       : Data_Aggregate_Range := AGGREGATE_WIDTH - 1;
-    signal dataAggregate : I2c_Aggregate        := X"00_00_00_00";
+    signal dataAggregate : I2C_Aggregate        := X"00_00_00_00";
     signal error         : boolean              := false;
     signal dbg           : std_logic            := '0';
 
