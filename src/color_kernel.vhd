@@ -7,12 +7,12 @@ use work.kernel_pkg.all;
 entity color_kernel is
     generic(
         -- edge detection kernel
-        kernelParams   : Convolution_Params   := (
+        constant kernelParams   : Convolution_Params   := (
             (-1, -1, -1),
             (-1, 8, -1),
             (-1, -1, -1)
         );
-        prescaleAmount : Convolution_Prescale := 0
+        constant prescaleAmount : Convolution_Prescale := 0
     );
     port(
         clkIn, rstAsyncIn        : in  std_logic;

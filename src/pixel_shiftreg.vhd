@@ -5,8 +5,8 @@ use work.common_pkg.all;
 
 entity pixel_shiftreg is
     generic(
-        SHIFT_LEN  : natural := (IMG_CONSTS.width * 2) + 3;
-        LINE_WIDTH : natural := IMG_CONSTS.width
+        constant SHIFT_LEN  : natural := (IMG_CONSTS.width * 2) + 3;
+        constant LINE_WIDTH : natural := IMG_CONSTS.width
     );
     port(
         clkIn, rstAsyncIn : in  std_logic;
