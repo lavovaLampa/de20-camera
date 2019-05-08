@@ -21,13 +21,13 @@ package i2c_pkg is
 
     type FSM_State is (Ready, SendData, ReleaseLine, WaitForAck, SendStop);
 
-    pure function logicToI2CBusState(val : std_logic) return std_logic;
-    pure function i2cBusStateToLogic(val : std_logic) return std_logic;
+    pure function logicToI2CBus(val : std_logic) return std_logic;
+    pure function i2cBusToLogic(val : std_logic) return std_logic;
 end package i2c_pkg;
 
 package body i2c_pkg is
 
-    pure function logicToI2CBusState(val : std_logic)
+    pure function logicToI2CBus(val : std_logic)
     return std_logic is
     begin
         case val is
@@ -37,9 +37,9 @@ package body i2c_pkg is
                 report "invalid logic value" severity failure;
                 return 'Z';
         end case;
-    end logicToI2CBusState;
+    end logicToI2CBus;
 
-    pure function i2cBusStateToLogic(val : std_logic) return std_logic is
+    pure function i2cBusToLogic(val : std_logic) return std_logic is
     begin
         case val is
             when 'Z' => return '1';
@@ -48,6 +48,6 @@ package body i2c_pkg is
                 report "invalid i2c bus state" severity failure;
                 return 'Z';
         end case;
-    end function i2cBusStateToLogic;
+    end function i2cBusToLogic;
 
 end package body i2c_pkg;

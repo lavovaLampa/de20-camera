@@ -5,8 +5,8 @@ use work.i2c_pkg.I2C_Addr;
 use work.i2c_pkg.I2C_Data;
 
 package common_pkg is
-    subtype CCD_WIDTH is natural range 0 to 2751;
-    subtype CCD_HEIGHT is natural range 0 to 2001;
+    subtype CCD_WIDTH_T is natural range 0 to 2751;
+    subtype CCD_HEIGHT_T is natural range 0 to 2001;
 
     type ROM_Data is record
         addr : I2C_Addr;
@@ -17,7 +17,7 @@ package common_pkg is
 
     pure function valToConfig(val : natural) return I2C_Data;
 
-    type Ccd_Properties is record
+    type CCD_Properties_R is record
         width         : positive;
         height        : positive;
         -- true active image size (excluding boundary region, dark region)
@@ -25,17 +25,17 @@ package common_pkg is
         active_height : positive;
         -- length of pixel data vector
         data_len      : positive;
-    end record Ccd_Properties;
+    end record CCD_Properties_R;
 
-    type Image_Properties is record
+    type Img_Properties_R is record
         -- the X coordinate of the upper-left corner of FOV -> EVEN (rounded down)
-        width_start   : CCD_WIDTH;
+        width_start   : CCD_WIDTH_T;
         -- the Y coordinate of the upper-left corner of FOV -> EVEN (rounded down)
-        height_start  : CCD_HEIGHT;
+        height_start  : CCD_HEIGHT_T;
         -- height of the FOV - 1 -> ODD (rounded up)
-        height        : CCD_HEIGHT;
+        height        : CCD_HEIGHT_T;
         -- width of the FOV - 1 -> ODD (rounded up)
-        width         : CCD_WIDTH;
+        width         : CCD_WIDTH_T;
         -- is chip outputting pixels mirrored
         is_mirrored   : boolean;
         -- how much pixel data do we really use/need
@@ -48,9 +48,9 @@ package common_pkg is
         shutter_width : natural;
         -- whether to show debug test pattern
         test_pattern  : boolean;
-    end record Image_Properties;
+    end record Img_Properties_R;
 
-    constant CCD_CONSTS : Ccd_Properties := (
+    constant CCD_CONSTS : CCD_Properties_R := (
         width         => 2752,
         height        => 2002,
         active_width  => 2592,
@@ -67,7 +67,7 @@ package common_pkg is
     --        pixel_data_size => 8
     --    );
 
-    constant IMG_CONSTS : Image_Properties := (
+    constant IMG_CONSTS : Img_Properties_R := (
         width_start   => 1052,
         height_start  => 758,
         height        => 64,
@@ -85,7 +85,7 @@ package common_pkg is
     constant TEST_PATTERN_SWITCH : Switch_T := (true => X"0001", false => X"0000");
 
     -- data to send to ccd chip in format (reg_addr, reg_data) [8b, 16b]
-    constant CCD_CONFIGURATION : Configuration_Array_T := (
+    constant CCD_CONFIG : Configuration_Array_T := (
         -- row start (Y coordinate of upper left FOV corner)
         (X"01", valToConfig(IMG_CONSTS.height_start)),
         -- column start (X coordinate of upper left FOV corner)

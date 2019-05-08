@@ -2,9 +2,11 @@
 SRC_DIR = src
 TB_DIR = tb
 LIB_DIR = $(SRC_DIR)/common_pkgs
+TB_LIB_DIR = $(TB_DIR)/common
 
 # list all sources
 LIBS = $(wildcard $(LIB_DIR)/*.vhd)
+LIBS += $(wildcard $(TB_LIB_DIR)/*.vhd)
 FILES = $(wildcard $(SRC_DIR)/*.vhd)
 FILES += $(wildcard $(TB_DIR)/*.vhd)
 FILES += $(LIBS)
@@ -29,8 +31,8 @@ GHDL_LIB_INFO = $(WORKDIR)/work-obj08.cf
 VIEW_CMD = gtkwave
 
 # import sources
-$(GHDL_LIB_INFO) : $(FILES) $(WORKDIR)
-	$(GHDL_CMD) -i $(MAKE_OPTS) --workdir=$(WORKDIR) $(SRC_DIR)/*.vhd $(TB_DIR)/*.vhd $(LIB_DIR)/*.vhd
+$(GHDL_LIB_INFO) : $(FILES) $(WORKDIR) $(LIBS)
+	$(GHDL_CMD) -i $(MAKE_OPTS) --workdir=$(WORKDIR) $(SRC_DIR)/*.vhd $(TB_DIR)/*.vhd $(LIB_DIR)/*.vhd $(TB_LIB_DIR)/*.vhd
 
 $(WORKDIR) :
 	mkdir $(WORKDIR)
@@ -49,6 +51,11 @@ color_kernel : $(GHDL_LIB_INFO) $(LIBS) $(TB_DIR)/color_kernel_tb.vhd $(SRC_DIR)
 i2c_ctrl : $(GHDL_LIB_INFO) $(LIBS) $(TB_DIR)/i2c_ctrl_tb.vhd $(SRC_DIR)/i2c_ctrl.vhd
 	$(GHDL_CMD) -m $(ELABORATE_OPTS) --workdir=$(WORKDIR) i2c_ctrl_tb
 	$(GHDL_CMD) -r $(RUN_OPTS) --workdir=$(WORKDIR) i2c_ctrl_tb $(GHW_OPTS)
+
+.PHONY : i2c_ccd_config
+i2c_ccd_config : $(GHDL_LIB_INFO) $(LIBS) $(TB_DIR)/i2c_ccd_config_tb.vhd $(SRC_DIR)/i2c_ccd_config.vhd
+	$(GHDL_CMD) -m $(ELABORATE_OPTS) --workdir=$(WORKDIR) i2c_ccd_config_tb
+	$(GHDL_CMD) -r $(RUN_OPTS) --workdir=$(WORKDIR) i2c_ccd_config_tb $(GHW_OPTS)
 
 .PHONY : show-wave
 show-wave : $(WORKDIR)/$(VCD_OUT_NAME)

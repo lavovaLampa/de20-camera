@@ -13,13 +13,13 @@ entity i2c_ccd_config is
         sClkOut           : out   std_logic;
         sDataIO           : inout std_logic
     );
-    alias romData is CCD_CONFIGURATION;
+    alias romData is CCD_CONFIG;
     type FSM_State is (WaitForEnable, SendCmd, AwaitCompletion, Done);
 end entity i2c_ccd_config;
 
 architecture RTL of i2c_ccd_config is
-    signal fsmState   : FSM_State := WaitForEnable;
-    signal romCounter : natural   := 0;
+    signal fsmState  : FSM_State := WaitForEnable;
+    signal configPtr : natural   := 0;
 
     -- i2c controller INPUT
     signal ctrlData            : I2C_Data := X"0000";
@@ -34,13 +34,13 @@ begin
     controlProc : process(clkIn, rstAsyncIn)
     begin
         if rstAsyncIn = '1' then
-            fsmState   <= WaitForEnable;
-            romCounter <= 0;
-            doneOut    <= false;
+            fsmState  <= WaitForEnable;
+            configPtr <= 0;
+            doneOut   <= false;
         elsif falling_edge(clkIn) then
             case fsmState is
                 when WaitForEnable =>
-                    romCounter <= romData'high;
+                    configPtr <= 0;
                     if enableIn then
                         fsmState <= SendCmd;
                     end if;
@@ -48,17 +48,17 @@ begin
                 when SendCmd =>
                     assert not ctrlDone and not ctrlError report "Controller in invalid state" severity failure;
                     fsmState   <= AwaitCompletion;
-                    dataAddr   <= romData(romCounter).addr;
-                    ctrlData   <= romData(romCounter).data;
+                    dataAddr   <= romData(configPtr).addr;
+                    ctrlData   <= romData(configPtr).data;
                     ctrlEnable <= true;
 
                 when AwaitCompletion =>
                     ctrlEnable <= false;
 
                     if ctrlDone then
-                        if romCounter < romData'high then
-                            fsmState   <= SendCmd;
-                            romCounter <= romCounter + 1;
+                        if configPtr < romData'high then
+                            fsmState  <= SendCmd;
+                            configPtr <= configPtr + 1;
                         else
                             fsmState <= Done;
                         end if;

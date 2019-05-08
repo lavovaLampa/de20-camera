@@ -122,8 +122,8 @@ begin
             end case;
 
             -- i2c data conversion
-            dbg <= logicToI2CBusState(dataOut);
-            sDataIO <= logicToI2CBusState(dataOut);
+            dbg     <= logicToI2CBus(dataOut);
+            sDataIO <= logicToI2CBus(dataOut);
         end if;
     end process controlProc;
 

@@ -95,7 +95,7 @@ begin
             dataOut    := '1';
             dataInAcc  := X"00000000";
         elsif rising_edge(sClkOut) then
-            currBit := i2cBusStateToLogic(sDataIO);
+            currBit := i2cBusToLogic(sDataIO);
             case state is
                 when Receive =>
                     report "Received bit (index): " & natural'image(bitPointer) & " -> Value: " & std_logic'image(currBit);
@@ -164,7 +164,7 @@ begin
             "Received: 0x" & to_hstring(tmpData) severity failure;
         end if;
 
-        sDataIO <= logicToI2CBusState(dataOut);
+        sDataIO <= logicToI2CBus(dataOut);
 
     end process mockSlave;
 
