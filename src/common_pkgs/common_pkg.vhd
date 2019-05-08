@@ -5,8 +5,8 @@ use work.i2c_pkg.I2C_Addr;
 use work.i2c_pkg.I2C_Data;
 
 package common_pkg is
-    subtype CCD_WIDTH_T is natural range 0 to 2751;
-    subtype CCD_HEIGHT_T is natural range 0 to 2001;
+    subtype CCD_Width_Range is natural range 0 to 2751;
+    subtype CCD_Height_Range is natural range 0 to 2001;
 
     type ROM_Data is record
         addr : I2C_Addr;
@@ -29,13 +29,13 @@ package common_pkg is
 
     type Img_Properties_R is record
         -- the X coordinate of the upper-left corner of FOV -> EVEN (rounded down)
-        width_start   : CCD_WIDTH_T;
+        width_start   : CCD_Width_Range;
         -- the Y coordinate of the upper-left corner of FOV -> EVEN (rounded down)
-        height_start  : CCD_HEIGHT_T;
+        height_start  : CCD_Height_Range;
         -- height of the FOV - 1 -> ODD (rounded up)
-        height        : CCD_HEIGHT_T;
+        height        : CCD_Height_Range;
         -- width of the FOV - 1 -> ODD (rounded up)
-        width         : CCD_WIDTH_T;
+        width         : CCD_Width_Range;
         -- is chip outputting pixels mirrored
         is_mirrored   : boolean;
         -- how much pixel data do we really use/need
