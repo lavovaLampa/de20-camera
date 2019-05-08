@@ -24,13 +24,15 @@ architecture RTL of pixel_shiftreg is
     signal shiftReg : Color_ShiftReg_Array := (others => (others => '0'));
 
 begin
-    shiftProc : process(clkIn, rstAsyncIn, enableIn)
+    shiftProc : process(clkIn, rstAsyncIn)
     begin
         if rstAsyncIn = '1' then
             shiftReg <= (others => (others => '0'));
-        elsif rising_edge(clkIn) and enableIn then
-            shiftReg(shiftReg'high - 1 downto 0) <= shiftReg(shiftReg'high downto 1);
-            shiftReg(shiftReg'high)              <= dataIn;
+        elsif rising_edge(clkIn) then
+            if enableIn then
+                shiftReg(shiftReg'high - 1 downto 0) <= shiftReg(shiftReg'high downto 1);
+                shiftReg(shiftReg'high)              <= dataIn;
+            end if;
         end if;
     end process shiftProc;
 

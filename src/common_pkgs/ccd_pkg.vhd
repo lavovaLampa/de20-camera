@@ -44,7 +44,7 @@ package body ccd_pkg is
         end if;
     end function decodeColor;
 
-    pure function currColorAbsolute(currWidth : CCD_WIDTH; currHeight : CCD_HEIGHT; isMirrored : boolean)
+    pure function currColorAbsolute(currWidth : CCD_WIDTH_T; currHeight : CCD_HEIGHT_T; isMirrored : boolean)
     return Ccd_Pixel_Color is
         variable isEvenRow    : boolean := currHeight mod 2 = 0;
         variable isEvenColumn : boolean := currWidth mod 2 = 0;
@@ -58,8 +58,8 @@ package body ccd_pkg is
 
     pure function getCurrColor(currWidth : Img_Width_Range; currHeight : Img_Height_Range)
     return Ccd_Pixel_Color is
-        variable absoluteWidth  : CCD_WIDTH  := IMG_CONSTS.width_start + currWidth;
-        variable absoluteHeight : CCD_HEIGHT := IMG_CONSTS.height_start + currHeight;
+        variable absoluteWidth  : CCD_WIDTH_T  := IMG_CONSTS.width_start + currWidth;
+        variable absoluteHeight : CCD_HEIGHT_T := IMG_CONSTS.height_start + currHeight;
     begin
         return currColorAbsolute(absoluteWidth, absoluteHeight, IMG_CONSTS.is_mirrored);
     end function getCurrColor;

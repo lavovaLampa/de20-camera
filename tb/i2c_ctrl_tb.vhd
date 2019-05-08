@@ -8,9 +8,9 @@ entity i2c_ctrl_tb is
     -- clock has to be 2 times i2c clock
     constant CLK_PERIOD : time := 2 * I2C_PERIOD;
 
-    constant TEST_DATA           : I2c_Data                      := X"5555";
-    constant TEST_DEV_ADDR       : I2c_Addr                      := CCD_WRITE_ADDR;
-    constant TEST_REG_ADDR       : I2c_Addr                      := X"55";
+    constant TEST_DATA           : I2C_Data                      := X"5555";
+    constant TEST_DEV_ADDR       : I2C_Addr                      := CCD_WRITE_ADDR;
+    constant TEST_REG_ADDR       : I2C_Addr                      := X"55";
     constant TEST_DATA_AGGREGATE : std_logic_vector(31 downto 0) := TEST_DEV_ADDR & TEST_REG_ADDR & TEST_DATA;
 end i2c_ctrl_tb;
 
@@ -18,9 +18,9 @@ architecture tb of i2c_ctrl_tb is
 
     signal clkIn, rstAsyncIn : std_logic := '0';
     signal enableIn          : boolean   := false;
-    signal dataIn            : i2c_data  := X"0000";
-    signal devAddrIn         : i2c_addr  := X"00";
-    signal dataAddrIn        : i2c_addr  := X"00";
+    signal dataIn            : I2C_Data  := X"0000";
+    signal devAddrIn         : I2C_Addr  := X"00";
+    signal dataAddrIn        : I2C_Addr  := X"00";
     signal doneOut, errorOut : boolean;
     signal sClkOut           : std_logic;
     signal sDataIO           : std_logic := 'Z';
@@ -81,13 +81,13 @@ begin
     mockSlave : process(sClkOut, sDataIO, rstAsyncIn)
         type Slave_State is (AwaitStart, Receive, Acknowledge, SkipAck, AwaitStop);
 
-        variable dataInAcc              : I2c_Aggregate        := X"00000000";
+        variable dataInAcc              : I2C_Aggregate        := X"00000000";
         variable state                  : Slave_State          := AwaitStart;
         variable bitPointer             : Data_Aggregate_Range := AGGREGATE_WIDTH - 1;
         variable dataOut                : std_logic            := '1';
         variable currBit                : std_logic            := '0';
-        variable tmpDevAddr, tmpRegAddr : I2c_Addr             := X"00";
-        variable tmpData                : I2c_Data             := X"0000";
+        variable tmpDevAddr, tmpRegAddr : I2C_Addr             := X"00";
+        variable tmpData                : I2C_Data             := X"0000";
     begin
         if rstAsyncIn = '1' then
             state      := AwaitStart;
@@ -95,7 +95,7 @@ begin
             dataOut    := '1';
             dataInAcc  := X"00000000";
         elsif rising_edge(sClkOut) then
-            currBit := i2cBusStateToLogic(sDataIO);
+            currBit := i2cBusToLogic(sDataIO);
             case state is
                 when Receive =>
                     report "Received bit (index): " & natural'image(bitPointer) & " -> Value: " & std_logic'image(currBit);
@@ -164,7 +164,7 @@ begin
             "Received: 0x" & to_hstring(tmpData) severity failure;
         end if;
 
-        sDataIO <= logicToI2CBusState(dataOut);
+        sDataIO <= logicToI2CBus(dataOut);
 
     end process mockSlave;
 

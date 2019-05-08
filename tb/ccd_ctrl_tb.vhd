@@ -19,6 +19,7 @@ entity ccd_ctrl_tb is
     constant TEST_FRAME_COUNT : natural  := 2;
     -- real constants are way higher
     -- TODO: consult documentation
+    -- TODO: parametrize from common_pkg constants
     constant TEST_HBLANK_CLKS : positive := 5;
     constant TEST_VBLANK_CLKS : positive := 10;
 
