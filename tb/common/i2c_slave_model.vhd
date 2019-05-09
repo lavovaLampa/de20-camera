@@ -10,8 +10,8 @@ entity i2c_slave_model is
     port(
         testClkIn                             : in    std_logic;
         sClkIn, rstAsyncIn                    : in    std_logic;
-        dataReceivedOut                       : out   boolean := false;
-        sDataIO                               : inout std_logic;
+        dataReceivedOut                       : out   boolean   := false;
+        sDataIO                               : inout std_logic := 'Z';
         recvDevAddrOut, recvDataAddrOut       : out   I2C_Addr;
         recvDataOut                           : out   I2C_Data;
         expectedDevAddrIn, expectedDataAddrIn : in    I2C_Addr;
