@@ -2,7 +2,7 @@ library ieee;
 use ieee.std_logic_1164.all;
 use ieee.numeric_std.all;
 use std.textio.all;
-use work.ccd_pkg.all;
+use work.ccd_ctrl_pkg.all;
 use work.common_pkg.all;
 use work.ccd_ctrl;
 
@@ -13,7 +13,7 @@ entity ccd_ctrl_tb is
     subtype Pipeline_Pixel is unsigned(PIPELINE_SIZE - 1 downto 0);
     subtype Pixel_Range is natural range PIXEL_SIZE - 1 downto 0;
     -- image value accumulator (we have to remember to check if pixels were computed successfully)
-    type Ccd_Image_Acc is array (0 to IMG_HEIGHT - 1, 0 to IMG_WIDTH - 1) of Ccd_Pixel_Data;
+    type Ccd_Image_Acc is array (0 to IMG_HEIGHT - 1, 0 to IMG_WIDTH - 1) of CCD_Pixel_Data_T;
 
     constant CLK_PERIOD       : time     := 20 ns; -- 50 MHz clock
     constant TEST_FRAME_COUNT : natural  := 2;
@@ -30,7 +30,7 @@ architecture test of ccd_ctrl_tb is
     -- dut interfacing signals
     signal clkIn, rstAsyncIn          : std_logic      := '0';
     signal frameValidIn, lineValidIn  : std_logic      := '0';
-    signal pixelDataIn                : Ccd_Pixel_Data := X"000";
+    signal pixelDataIn                : CCD_Pixel_Data_T := X"000";
     signal pixelOut                   : Pixel_Aggregate;
     signal pixelValidOut, frameEndOut : boolean;
 
@@ -56,7 +56,7 @@ begin
                  pixelValidOut => pixelValidOut);
 
     stimuli : process
-        variable pixelDataAcc : Ccd_Pixel_Data;
+        variable pixelDataAcc : CCD_Pixel_Data_T;
     begin
         -- generate reset
         rstAsyncIn <= '1';
@@ -72,7 +72,7 @@ begin
             for y in 0 to IMG_HEIGHT - 1 loop
                 lineValidIn <= '1';
                 for x in 0 to IMG_WIDTH - 1 loop
-                    pixelDataAcc      := std_logic_vector(to_unsigned(x, Ccd_Pixel_Data'length));
+                    pixelDataAcc      := std_logic_vector(to_unsigned(x, CCD_Pixel_Data_T'length));
                     pixelMatrix(y, x) <= pixelDataAcc;
                     pixelDataIn       <= pixelDataAcc;
                     wait until falling_edge(clkIn);
@@ -97,7 +97,7 @@ begin
         type Integer_Pixel_Matrix is array (2 downto 0, 2 downto 0) of natural;
         constant NEW_HEIGHT                      : Img_Height_Range := IMG_HEIGHT - 2;
         constant NEW_WIDTH                       : Img_Width_Range  := IMG_WIDTH - 2;
-        variable currColor                       : Ccd_Pixel_Color  := Green1;
+        variable currColor                       : CCD_Pixel_Color_T  := Green1;
         variable redColor, greenColor, blueColor : natural;
         variable arrayX, arrayY, pixelCount      : natural          := 0;
         variable tmpArray                        : Integer_Pixel_Matrix;

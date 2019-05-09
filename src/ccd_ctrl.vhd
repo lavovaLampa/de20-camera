@@ -1,14 +1,14 @@
 library ieee;
 use ieee.std_logic_1164.all;
 use ieee.numeric_std.all;
-use work.ccd_pkg.all;
+use work.ccd_ctrl_pkg.all;
 use work.common_pkg.all;
 
 entity ccd_ctrl is
     port(
         clkIn, rstAsyncIn          : in  std_logic;
         frameValidIn, lineValidIn  : in  std_logic;
-        pixelDataIn                : in  Ccd_Pixel_Data;
+        pixelDataIn                : in  CCD_Pixel_Data_T;
         pixelOut                   : out Pixel_Aggregate;
         pixelValidOut, frameEndOut : out boolean
     );
@@ -32,7 +32,7 @@ architecture RTL of ccd_ctrl is
     signal color1Out, color2Out : Stage_Out       := (others => (others => '0'));
     signal color3Out            : Pixel_Data      := B"0000_0000";
     signal stageFrameEnd        : boolean         := false;
-    signal stageColor           : Ccd_Pixel_Color := Green1;
+    signal stageColor           : CCD_Pixel_Color_T := Green1;
     signal pipelineReady        : boolean         := false;
 
     impure function isImageEdge return boolean is
@@ -83,7 +83,7 @@ begin
     end process shiftProc;
 
     demosaicStage1 : process(clkIn, rstAsyncIn)
-        variable currColor     : Ccd_Pixel_Color := getCurrColor(currShiftWidth, currShiftHeight);
+        variable currColor     : CCD_Pixel_Color_T := getCurrColor(currShiftWidth, currShiftHeight);
         variable resizedMatrix : Pipeline_Matrix := (others => (others => (others => '0')));
     begin
         if rstAsyncIn = '1' then

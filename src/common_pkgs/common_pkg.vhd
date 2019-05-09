@@ -5,18 +5,6 @@ use work.i2c_pkg.I2C_Addr;
 use work.i2c_pkg.I2C_Data;
 
 package common_pkg is
-    subtype CCD_Width_Range is natural range 0 to 2751;
-    subtype CCD_Height_Range is natural range 0 to 2001;
-
-    type ROM_Data is record
-        addr : I2C_Addr;
-        data : I2C_Data;
-    end record ROM_Data;
-    type Configuration_Array_T is array (natural range <>) of ROM_Data;
-    type Switch_T is array (boolean) of I2C_Data;
-
-    pure function valToConfig(val : natural) return I2C_Data;
-
     type CCD_Properties_R is record
         width         : positive;
         height        : positive;
@@ -26,6 +14,26 @@ package common_pkg is
         -- length of pixel data vector
         data_len      : positive;
     end record CCD_Properties_R;
+
+    constant CCD_CONSTS : CCD_Properties_R := (
+        width         => 2752,
+        height        => 2002,
+        active_width  => 2592,
+        active_height => 1944,
+        data_len      => 12
+    );
+
+    subtype CCD_Width_Range is natural range 0 to CCD_CONSTS.width - 1;
+    subtype CCD_Height_Range is natural range 0 to CCD_CONSTS.height - 1;
+
+    type ROM_Data is record
+        addr : I2C_Addr;
+        data : I2C_Data;
+    end record ROM_Data;
+    type Configuration_Array_T is array (natural range <>) of ROM_Data;
+    type Switch_T is array (boolean) of I2C_Data;
+
+    pure function valToConfig(val : natural) return I2C_Data;
 
     type Img_Properties_R is record
         -- the X coordinate of the upper-left corner of FOV -> EVEN (rounded down)
@@ -49,14 +57,6 @@ package common_pkg is
         -- whether to show debug test pattern
         test_pattern  : boolean;
     end record Img_Properties_R;
-
-    constant CCD_CONSTS : CCD_Properties_R := (
-        width         => 2752,
-        height        => 2002,
-        active_width  => 2592,
-        active_height => 1944,
-        data_len      => 12
-    );
 
     --    constant IMG_CONSTS : Image_Properties := (
     --        width_start     => 1053,
@@ -131,6 +131,12 @@ package common_pkg is
 
     subtype Img_Height_Range is natural range 0 to IMG_CONSTS.height - 1;
     subtype Img_Width_Range is natural range 0 to IMG_CONSTS.width - 1;
+
+    -- CCD TYPES
+    subtype CCD_Pixel_Data_T is std_logic_vector((CCD_CONSTS.data_len - 1) downto 0);
+    -- ccd has bayer color mask (2 * green pixel)
+    type CCD_Pixel_Color_T is (Red, Green1, Green2, Blue);
+    type CCD_Matrix_T is array (CCD_Height_Range, CCD_Width_Range) of CCD_Pixel_Data_T;
 
     -- COMMON INTERNAL TYPES
     subtype Pixel_Data is unsigned((IMG_CONSTS.pixel_size - 1) downto 0);
