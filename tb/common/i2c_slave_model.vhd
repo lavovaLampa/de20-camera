@@ -5,13 +5,15 @@ use work.i2c_pkg.all;
 
 entity i2c_slave_model is
     generic(
-        DEBUG : boolean := false
+        DEBUG, CHECK_DATA : boolean := false
     );
     port(
         testClkIn                             : in    std_logic;
         sClkIn, rstAsyncIn                    : in    std_logic;
         dataReceivedOut                       : out   boolean := false;
         sDataIO                               : inout std_logic;
+        recvDevAddrOut, recvDataAddrOut       : out   I2C_Addr;
+        recvDataOut                           : out   I2C_Data;
         expectedDevAddrIn, expectedDataAddrIn : in    I2C_Addr;
         expectedDataIn                        : in    I2C_Data
     );
@@ -70,10 +72,12 @@ begin
                     dataDone <= false;
                     if startReceived then
                         debugPrint("Received bit (index): " & natural'image(bitPtr) & " -> Value: " & std_logic'image(currBit));
-                        assert currBit = testDataAggregate(bitPtr)
-                        report "Received wrong bit value at index: " & natural'image(bitPtr) & LF &
+                        if CHECK_DATA then
+                            assert currBit = testDataAggregate(bitPtr)
+                            report "Received wrong bit value at index: " & natural'image(bitPtr) & LF &
                                "Expected: " & std_logic'image(testDataAggregate(bitPtr)) & LF &
                                "Received: " & std_logic'image(currBit) severity warning;
+                        end if;
 
                         dataInAcc(bitPtr) <= currBit;
                         if bitPtr mod 8 = 0 then
@@ -125,8 +129,8 @@ begin
 
     -- latches & potentially non-synthesizable constructs ahead, BEWARE!
     ctrlProc : process(sDataIO, rstAsyncIn)
-        variable tmpDevAddr, tmpRegAddr : I2C_Addr := X"00";
-        variable tmpData                : I2C_Data := X"0000";
+        variable tmpDevAddr, tmpDataAddr : I2C_Addr := X"00";
+        variable tmpData                 : I2C_Data := X"0000";
     begin
         if rstAsyncIn = '1' then
             endReceived   <= false;
@@ -149,28 +153,34 @@ begin
                 endReceived   <= true;
 
                 assert dataDone report "Slave didn't receive all data" severity failure;
-                tmpDevAddr := dataInAcc(31 downto 24);
-                tmpRegAddr := dataInAcc(23 downto 16);
-                tmpData    := dataInAcc(DATA_WIDTH - 1 downto 0);
+                tmpDevAddr  := dataInAcc(31 downto 24);
+                tmpDataAddr := dataInAcc(23 downto 16);
+                tmpData     := dataInAcc(DATA_WIDTH - 1 downto 0);
                 report "Data received OK: 0x" & to_hstring(dataInAcc);
 
-                assert tmpDevAddr = expectedDevAddrIn
-                report "Wrong device address received" & LF &
+                if CHECK_DATA then
+                    assert tmpDevAddr = expectedDevAddrIn
+                    report "Wrong device address received" & LF &
                        "Expected: 0x" & to_hstring(expectedDevAddrIn) & LF &
                        "Received: 0x" & to_hstring(tmpDevAddr) severity failure;
 
-                assert tmpRegAddr = expectedDataAddrIn
-                report "received register address is not equal" & LF &
+                    assert tmpDataAddr = expectedDataAddrIn
+                    report "received register address is not equal" & LF &
                        "Expected: 0x" & to_hstring(expectedDataAddrIn) & LF &
-                       "Received: 0x" & to_hstring(tmpRegAddr) severity failure;
+                       "Received: 0x" & to_hstring(tmpDataAddr) severity failure;
 
-                assert tmpData = expectedDataIn
-                report "Received wrong data (not equal to what was sent)" & LF &
+                    assert tmpData = expectedDataIn
+                    report "Received wrong data (not equal to what was sent)" & LF &
                        "Expected: 0x" & to_hstring(expectedDataIn) & LF &
                        "Received: 0x" & to_hstring(tmpData) severity failure;
+                end if;
 
                 batchOk <= true;
             end if;
         end if;
+
+        recvDevAddrOut  <= tmpDevAddr;
+        recvDataAddrOut <= tmpDataAddr;
+        recvDataOut     <= tmpData;
     end process ctrlProc;
 end architecture RTL;

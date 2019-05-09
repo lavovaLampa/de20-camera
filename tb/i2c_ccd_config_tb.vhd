@@ -4,7 +4,8 @@ use work.i2c_pkg.all;
 use work.common_pkg.all;
 
 entity i2c_ccd_config_tb is
-    constant CLK_PERIOD : time := 20 ns; -- 50MHz clock
+    constant VERBOSE    : boolean := false;
+    constant CLK_PERIOD : time    := 20 ns; -- 50MHz clock
 end i2c_ccd_config_tb;
 
 architecture tb of i2c_ccd_config_tb is
@@ -15,8 +16,10 @@ architecture tb of i2c_ccd_config_tb is
     signal expectedData                      : I2C_Data;
     signal expectedDataAddr, expectedDevAddr : I2C_Addr;
 
-    signal slaveDataReceived : boolean;
-    signal dataOutCount      : natural := 0;
+    signal slaveDataReceived         : boolean;
+    signal dataOutCount              : natural := 0;
+    signal recvData                  : I2C_Data;
+    signal recvDevAddr, recvDataAddr : I2C_Addr;
 
     -- i2c signals
     signal sClkOut : std_logic;
@@ -39,7 +42,8 @@ begin
 
     i2cSlave : entity work.i2c_slave_model
         generic map(
-            DEBUG => false
+            DEBUG      => false,
+            CHECK_DATA => true
         )
         port map(
             testClkIn          => clkIn,
@@ -49,7 +53,10 @@ begin
             sDataIO            => sDataIO,
             expectedDataIn     => expectedData,
             expectedDataAddrIn => expectedDataAddr,
-            expectedDevAddrIn  => expectedDevAddr
+            expectedDevAddrIn  => expectedDevAddr,
+            recvDevAddrOut     => recvDevAddr,
+            recvDataAddrOut    => recvDataAddr,
+            recvDataOut        => recvData
         );
 
     -- Clock generation
@@ -91,8 +98,14 @@ begin
             expectedData     <= CCD_CONFIG(configPtr).data;
             expectedDataAddr <= CCD_CONFIG(configPtr).addr;
             if slaveDataReceived then
+                if VERBOSE then
+                    report "Config array pointer: " & natural'image(configPtr);
+                    report "Received device address: 0x" & to_hstring(recvDevAddr);
+                    report "Received data address: 0x" & to_hstring(recvDataAddr);
+                    report "Received data: 0x" & to_hstring(recvData);
+                end if;
+
                 dataOutCount <= dataOutCount + 1;
-                report "Config array pointer: " & natural'image(configPtr);
                 if configPtr < CCD_CONFIG'length - 1 then
                     configPtr := configPtr + 1;
                 end if;
