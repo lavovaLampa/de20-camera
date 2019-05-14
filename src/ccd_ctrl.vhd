@@ -29,11 +29,11 @@ architecture RTL of ccd_ctrl is
     signal hasNewPixel, frameEnd : boolean           := false;
 
     -- demosaicStage1 (API)
-    signal color1Out, color2Out : Stage_Out       := (others => (others => '0'));
-    signal color3Out            : Pixel_Data      := B"0000_0000";
-    signal stageFrameEnd        : boolean         := false;
+    signal color1Out, color2Out : Stage_Out         := (others => (others => '0'));
+    signal color3Out            : Pixel_Data        := B"0000_0000";
+    signal stageFrameEnd        : boolean           := false;
     signal stageColor           : CCD_Pixel_Color_T := Green1;
-    signal pipelineReady        : boolean         := false;
+    signal pipelineReady        : boolean           := false;
 
     impure function isImageEdge return boolean is
     begin
@@ -83,8 +83,8 @@ begin
     end process shiftProc;
 
     demosaicStage1 : process(clkIn, rstAsyncIn)
-        variable currColor     : CCD_Pixel_Color_T := getCurrColor(currShiftWidth, currShiftHeight);
-        variable resizedMatrix : Pipeline_Matrix := (others => (others => (others => '0')));
+        variable currColor     : CCD_Pixel_Color_T := Green1;
+        variable resizedMatrix : Pipeline_Matrix   := (others => (others => (others => '0')));
     begin
         if rstAsyncIn = '1' then
             pipelineReady <= false;
@@ -94,7 +94,7 @@ begin
             color3Out     <= (others => '0');
             stageFrameEnd <= false;
         elsif rising_edge(clkIn) then
-            currColor := getCurrColor(currShiftWidth, currShiftHeight);
+            currColor := getCurrColor(currShiftHeight, currShiftWidth);
 
             -- ignore image edges
             pipelineReady <= hasNewPixel and not isImageEdge;

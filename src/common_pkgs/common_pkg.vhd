@@ -6,25 +6,51 @@ use work.i2c_pkg.I2C_Data;
 
 package common_pkg is
     type CCD_Properties_R is record
-        width         : positive;
-        height        : positive;
-        -- true active image size (excluding boundary region, dark region)
-        active_width  : positive;
-        active_height : positive;
+        width    : positive;
+        height   : positive;
         -- length of pixel data vector
-        data_len      : positive;
+        data_len : positive;
     end record CCD_Properties_R;
 
     constant CCD_CONSTS : CCD_Properties_R := (
-        width         => 2752,
-        height        => 2002,
-        active_width  => 2592,
-        active_height => 1944,
-        data_len      => 12
+        width    => 2752,
+        height   => 2002,
+        data_len => 12
+    );
+
+    type Region_Bounds_R is record
+        low  : natural;
+        -- end is reserved word :(
+        high : natural;
+    end record Region_Bounds_R;
+
+    type CCD_Region_R is record
+        dark1     : Region_Bounds_R;
+        boundary1 : Region_Bounds_R;
+        active    : Region_Bounds_R;
+        boundary2 : Region_Bounds_R;
+        dark2     : Region_Bounds_R;
+    end record CCD_Region_R;
+
+    constant COL_REGIONS : CCD_Region_R := (
+        dark1     => (0, 9),
+        boundary1 => (10, 15),
+        active    => (16, 2607),
+        boundary2 => (2608, 2617),
+        dark2     => (2618, 2751)
+    );
+
+    constant ROW_REGIONS : CCD_Region_R := (
+        dark1     => (0, 49),
+        boundary1 => (50, 53),
+        active    => (54, 1997),
+        boundary2 => (1998, 2000),
+        dark2     => (2001, 2001)
     );
 
     subtype CCD_Width_Range is natural range 0 to CCD_CONSTS.width - 1;
     subtype CCD_Height_Range is natural range 0 to CCD_CONSTS.height - 1;
+    subtype CCD_Pixel_Count_Range is natural range 0 to CCD_CONSTS.width * CCD_CONSTS.height;
 
     type ROM_Data is record
         addr : I2C_Addr;
@@ -68,10 +94,10 @@ package common_pkg is
     --    );
 
     constant IMG_CONSTS : Img_Properties_R := (
-        width_start   => 1052,
-        height_start  => 758,
-        height        => 64,
-        width         => 84,
+        width_start   => 990,
+        height_start  => 838,
+        height        => 484,
+        width         => 644,
         is_mirrored   => false,
         pixel_size    => 8,
         hblank        => 768,
@@ -91,9 +117,9 @@ package common_pkg is
         -- column start (X coordinate of upper left FOV corner)
         (X"02", valToConfig(IMG_CONSTS.width_start)),
         -- height of FOV
-        (X"03", valToConfig(IMG_CONSTS.height)),
+        (X"03", valToConfig(IMG_CONSTS.height - 1)),
         -- width of FOV
-        (X"04", valToConfig(IMG_CONSTS.width)),
+        (X"04", valToConfig(IMG_CONSTS.width - 1)),
         -- hblank (num. of PIXCLKs)
         (X"05", valToConfig(IMG_CONSTS.hblank)),
         -- vblank (num. of PIXCLKs)
@@ -136,7 +162,8 @@ package common_pkg is
     subtype CCD_Pixel_Data_T is std_logic_vector((CCD_CONSTS.data_len - 1) downto 0);
     -- ccd has bayer color mask (2 * green pixel)
     type CCD_Pixel_Color_T is (Red, Green1, Green2, Blue);
-    type CCD_Matrix_T is array (CCD_Height_Range, CCD_Width_Range) of CCD_Pixel_Data_T;
+    type CCD_Matrix_T is array (Img_Height_Range, Img_Width_Range) of CCD_Pixel_Data_T;
+    type CCD_Pixel_Type is (Dark, Boundary, Active, Hsync, Vsync);
 
     -- COMMON INTERNAL TYPES
     subtype Pixel_Data is unsigned((IMG_CONSTS.pixel_size - 1) downto 0);
@@ -145,13 +172,70 @@ package common_pkg is
     type Pixel_Aggregate is array (Pixel_Color) of Pixel_Data;
     type Pixel_Matrix is array (2 downto 0, 2 downto 0) of Pixel_Data;
 
+    pure function getCcdPixelType(absoluteHeight : natural; absoluteWidth : natural) return CCD_Pixel_Type;
 end package common_pkg;
 
 package body common_pkg is
 
-    pure function valToConfig(val : natural) return I2C_Data is
+    pure function valToConfig(val : natural)
+    return I2C_Data is
     begin
         return std_logic_vector(to_unsigned(val, I2C_Data'length));
     end function valToConfig;
+
+    pure function getRowType(absoluteHeight : natural) return CCD_Pixel_Type is
+    begin
+        case absoluteHeight is
+            when ROW_REGIONS.dark1.low to ROW_REGIONS.dark1.high | ROW_REGIONS.dark2.low to ROW_REGIONS.dark2.high =>
+                return Dark;
+
+            when ROW_REGIONS.boundary1.low to ROW_REGIONS.boundary1.high | ROW_REGIONS.boundary2.low to ROW_REGIONS.boundary2.high =>
+                return Boundary;
+
+            when ROW_REGIONS.active.low to ROW_REGIONS.active.high =>
+                return Active;
+
+            when others =>
+                return Vsync;
+        end case;
+    end function getRowType;
+
+    pure function getColType(absoluteWidth : natural) return CCD_Pixel_Type is
+    begin
+        case absoluteWidth is
+            when COL_REGIONS.dark1.low to COL_REGIONS.dark1.high | COL_REGIONS.dark2.low to COL_REGIONS.dark2.high =>
+                return Dark;
+
+            when COL_REGIONS.boundary1.low to COL_REGIONS.boundary1.high | COL_REGIONS.boundary2.low to COL_REGIONS.boundary2.high =>
+                return Boundary;
+
+            when COL_REGIONS.active.low to COL_REGIONS.active.high =>
+                return Active;
+
+            when others =>
+                return Hsync;
+        end case;
+    end function getColType;
+
+    pure function getCcdPixelType(absoluteHeight : natural; absoluteWidth : natural) return CCD_Pixel_Type is
+        constant colType : CCD_Pixel_Type := getColType(absoluteWidth);
+        constant rowType : CCD_Pixel_Type := getRowType(absoluteHeight);
+    begin
+        if rowType = Dark or colType = Dark then
+            return Dark;
+        elsif rowType = Vsync then
+            return Vsync;
+        elsif colType = Hsync then
+            return Hsync;
+        elsif rowType = Boundary then
+            if colType = Active then
+                return Boundary;
+            else
+                return colType;
+            end if;
+        else
+            return colType;
+        end if;
+    end function getCcdPixelType;
 
 end package body common_pkg;

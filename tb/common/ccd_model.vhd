@@ -8,22 +8,24 @@ use work.ccd_ctrl_pkg.getCurrColor;
 
 entity ccd_model is
     generic(
-        INIT_HEIGHT : CCD_Height_Range := 1943;
-        INIT_WIDTH  : CCD_Width_Range  := 2591;
-        DEBUG       : boolean          := false
+        INIT_HEIGHT       : CCD_Height_Range := 484;
+        INIT_WIDTH        : CCD_Width_Range  := 644;
+        INIT_HEIGHT_START : CCD_Height_Range := ROW_START_DEFAULT;
+        INIT_WIDTH_START  : CCD_Width_Range  := COL_START_DEFAULT;
+        DEBUG             : boolean          := false
     );
     port(
         -- MODEL
-        clkIn, nRstAsyncIn         : in    std_logic;
-        pixClkOut, lineValidOut    : out   std_logic;
-        frameValidOut, strobeOut   : out   std_logic;
-        dataOut                    : out   CCD_Pixel_Data_T;
+        clkIn, nRstAsyncIn            : in    std_logic;
+        pixClkOut, lineValidOut       : out   std_logic;
+        frameValidOut, strobeOut      : out   std_logic;
+        dataOut                       : out   CCD_Pixel_Data_T;
         --- serial (i2c) communication
-        sClkIn                     : in    std_logic;
-        sDataIO                    : inout std_logic;
+        sClkIn                        : in    std_logic;
+        sDataIO                       : inout std_logic;
         -- DEBUG
-        ccdArrayIn                 : in    CCD_Matrix_T;
-        frameDone, configUpdateOut : out   boolean
+        ccdArrayIn                    : in    CCD_Matrix_T;
+        frameDoneOut, configUpdateOut : out   boolean
     );
 
     procedure debugPrint(val : string) is
@@ -32,13 +34,10 @@ entity ccd_model is
             report val;
         end if;
     end procedure debugPrint;
-
 end entity ccd_model;
 
 -- TODO: write assert for rowStart, colStart, rowSize, colSize
 architecture RTL of ccd_model is
-    --    subtype FOV_Height_Range is natural range 0 to CCD_Height_Range'high - currOptions.rowStart;
-    --    subtype FOV_Width_Range is natural range 0 to CCD_Width_Range'high - currOptions.colStart;
     signal paramsReg : CCD_Params_R := (
         rowStart  => ROW_START_DEFAULT,
         colStart  => COL_START_DEFAULT,
@@ -51,67 +50,96 @@ architecture RTL of ccd_model is
     );
 
     -- TODO: better names
-    signal isHBlank, isVBlank : boolean := false;
+    signal hBlank, vBlank : boolean := false;
 begin
 
-    -- internal PLL currently not implemented
-    pixClkOut <= clkIn;
+    -- internal PLL currently not implemented (but we invert the pixclock output)
+    pixClkOut     <= not clkIn;
+    lineValidOut  <= not boolToLogic(hBlank);
+    frameValidOut <= not boolToLogic(vBlank);
 
     imageOutProc : process(clkIn, nRstAsyncIn)
         type CCD_State is (ConfigReadout, MatrixReadout);
         variable currState   : CCD_State := ConfigReadout;
         -- options valid for current frame (options are synchronized to frame boundaries)
         variable currOptions : CCD_Params_R;
+        subtype Temp_Width_Range is natural range 0 to 6846;
+        subtype Temp_Height_Range is natural range 0 to 4048;
 
-        variable currWidth, widthEnd   : CCD_Width_Range  := 0; -- absolute
-        variable currHeight, heightEnd : CCD_Height_Range := 0; -- absolute
+        variable currWidth  : Temp_Width_Range      := 0; -- absolute
+        variable currHeight : Temp_Height_Range     := 0; -- absolute
+        variable debugCount : CCD_Pixel_Count_Range := 0;
 
-        impure function getPixelOut(height : CCD_Height_Range; width : CCD_Width_Range)
-        return CCD_Pixel_Data_T is
+        impure function getPixelOut(height : Temp_Height_Range; width : Temp_Width_Range) return CCD_Pixel_Data_T is
+            constant pixelType : CCD_Pixel_Type := getCcdPixelType(height, width);
         begin
-            -- FIXME: bad bounds calculation!
-            if height > currOptions.rowStart and height < currOptions.rowStart + currOptions.rowSize and width > currOptions.colStart and width < currOptions.colStart + currOptions.colSize then
-                return ccdArrayIn(height, width);
-            else
-                -- hblank/vblank occuring
-                debugPrint("vblank/hblank pixel query");
-                return X"000";
-            end if;
+            case pixelType is
+                when Dark =>
+                    return X"000";
+
+                when Vsync | Hsync =>
+                    return X"000";
+
+                when Active | Boundary =>
+                    if height >= currOptions.rowStart and height < currOptions.rowStart + currOptions.rowSize and width >= currOptions.colStart and width < currOptions.colStart + currOptions.colSize then
+                        debugPrint("CCD arrray access at (height, width): " & natural'image(height) & ", " & natural'image(width));
+                        debugPrint("Array coords: " & natural'image(height - currOptions.rowStart) & ", " & natural'image(width - currOptions.colStart));
+                        return ccdArrayIn(height - currOptions.rowStart, width - currOptions.colStart);
+                    else
+                        -- hblank
+                        return X"000";
+                    end if;
+            end case;
         end function getPixelOut;
     begin
         if nRstAsyncIn = '0' then
-            currWidth  := 0;
-            currHeight := 0;
-            isHBlank   <= true;
-            isVBlank   <= true;
-        elsif falling_edge(clkIn) then
-            isHBlank <= currWidth > (currOptions.colStart + currOptions.colSize);
-            isVblank <= currHeight > (currOptions.rowStart + currOptions.rowSize);
+            debugCount   := (currOptions.rowSize + 1) * (currOptions.colSize + 1);
+            currWidth    := 0;
+            currHeight   := 0;
+            hBlank       <= true;
+            vBlank       <= true;
+            frameDoneOut <= false;
+        elsif rising_edge(clkIn) then
 
             case currState is
                 when ConfigReadout =>
-                    currState   := MatrixReadout;
+                    if DEBUG then
+                        assert debugCount = (currOptions.rowSize + 1) * (currOptions.colSize + 1)
+                        report "Pixel count not equal to width * height of frame!"
+                        severity failure;
+                    end if;
+                    currState    := MatrixReadout;
                     -- update current configuration parameters
-                    currOptions := paramsReg;
+                    currOptions  := paramsReg;
                     -- reset value to defaults
-                    -- FIXME: hodnoty sa pouzivaju inak (val - 1?)
-                    currWidth   := currOptions.colStart;
-                    widthEnd    := currOptions.colStart + currOptions.colSize;
-                    currHeight  := currOptions.rowStart;
-                    heightEnd   := currOptions.rowStart + currOptions.rowSize;
+                    currWidth    := currOptions.colStart;
+                    currHeight   := currOptions.rowStart;
+                    debugCount   := 0;
+                    frameDoneOut <= false;
+                    debugPrint(
+                        LF & "Row start: " & natural'image(currOptions.rowStart) & LF & "Col start: " & natural'image(currOptions.colStart)
+                    );
+
+                    assert getCurrColor(0, 0) = Green1
+                    report "First pixel is not correctly aligned to whole Bayer pixel!"
+                    severity failure;
 
                 when MatrixReadout =>
-                    dataOut <= getPixelOut(currHeight, currWidth);
+                    hBlank     <= currWidth >= (currOptions.colStart + currOptions.colSize);
+                    vBlank     <= currHeight >= (currOptions.rowStart + currOptions.rowSize);
+                    debugCount := debugCount + 1;
+                    dataOut    <= getPixelOut(currHeight, currWidth);
 
-                    if currWidth < (widthEnd + currOptions.hblank) then
+                    if currWidth < (currOptions.colStart + currOptions.colSize + currOptions.hblank) then
                         currWidth := currWidth + 1;
                     else
-                        currWidth  := 0;
+                        currWidth  := currOptions.colStart;
                         currHeight := currHeight + 1;
                     end if;
 
-                    if currHeight >= (heightEnd + currOptions.vblank) then
-                        currState := ConfigReadout;
+                    if currHeight > (currOptions.rowStart + currOptions.rowSize + currOptions.vblank) then
+                        currState    := ConfigReadout;
+                        frameDoneOut <= true;
                     end if;
 
             end case;
@@ -132,8 +160,8 @@ begin
         begin
             if nRstAsyncIn = '0' then
                 -- initialize defaults
-                paramsReg.rowStart  <= ROW_START_DEFAULT;
-                paramsReg.colStart  <= COL_START_DEFAULT;
+                paramsReg.rowStart  <= INIT_HEIGHT_START;
+                paramsReg.colStart  <= INIT_WIDTH_START;
                 paramsReg.rowSize   <= INIT_HEIGHT;
                 paramsReg.colSize   <= INIT_WIDTH;
                 paramsReg.hblank    <= HBLANK_DEFAULT;
@@ -141,16 +169,21 @@ begin
                 paramsReg.rowMirror <= false;
                 paramsReg.colMirror <= false;
             elsif rising_edge(clkIn) then
+                -- TODO: should be asserted only if valid value arrived?
+                configUpdateOut <= newDataArrived;
+
                 if newDataArrived then
                     case dataAddrIn is
                         when REG_ADDR.rowStart =>
                             tmpData := to_integer(unsigned(dataIn));
                             if tmpData mod 2 = 1 then
-                                report "Expecting odd value. Next lower even value will be used!" severity warning;
+                                report "Expecting even value. Next lower even value will be used!"
+                                severity warning;
                                 tmpData := tmpData - 1;
                             end if;
                             if tmpData > 2004 then
-                                report "Invalid value range. Legal range: [0 - 2004], even." severity warning;
+                                report "Invalid value range. Legal range: [0 - 2004], even."
+                                severity warning;
                             else
                                 paramsReg.rowStart <= tmpData;
                             end if;
@@ -158,11 +191,13 @@ begin
                         when REG_ADDR.colStart =>
                             tmpData := to_integer(unsigned(dataIn));
                             if tmpData mod 2 = 1 then
-                                report "Expecting odd value. Next lower even value will be used!" severity warning;
+                                report "Expecting even value. Next lower even value will be used!"
+                                severity warning;
                                 tmpData := tmpData - 1;
                             end if;
                             if tmpData > 2750 then
-                                report "Invalid value range. Legal range: [0 - 2750], even." severity warning;
+                                report "Invalid value range. Legal range: [0 - 2750], even."
+                                severity warning;
                             else
                                 paramsReg.colStart <= tmpData;
                             end if;
@@ -170,11 +205,13 @@ begin
                         when REG_ADDR.rowSize =>
                             tmpData := to_integer(unsigned(dataIn));
                             if tmpData mod 2 = 0 then
-                                report "Expecting even value. Next higher odd value will be used!" severity warning;
+                                report "Expecting odd value. Next higher odd value will be used!"
+                                severity warning;
                                 tmpData := tmpData + 1;
                             end if;
                             if tmpData < 1 or tmpData > 2005 then
-                                report "Invalid value range. Legal range: [1 - 2005], odd." severity warning;
+                                report "Invalid value range. Legal range: [1 - 2005], odd."
+                                severity warning;
                             else
                                 paramsReg.rowSize <= tmpData;
                             end if;
@@ -182,11 +219,13 @@ begin
                         when REG_ADDR.colSize =>
                             tmpData := to_integer(unsigned(dataIn));
                             if tmpData mod 2 = 0 then
-                                report "Expecting even value. Next higher odd value will be used!" severity warning;
+                                report "Expecting odd value. Next higher odd value will be used!"
+                                severity warning;
                                 tmpData := tmpData + 1;
                             end if;
                             if tmpData < 1 or tmpData > 2751 then
-                                report "Invalid value range. Legal range: [1 - 2751], odd." severity warning;
+                                report "Invalid value range. Legal range: [1 - 2751], odd."
+                                severity warning;
                             else
                                 paramsReg.colSize <= tmpData;
                             end if;
@@ -194,10 +233,12 @@ begin
                         when REG_ADDR.hblank =>
                             tmpData := to_integer(unsigned(dataIn));
                             if tmpData > 4095 then
-                                report "Invalid value range. Legal range: [0 - 4095]." severity warning;
+                                report "Invalid value range. Legal range: [0 - 4095]."
+                                severity warning;
                             else
                                 if tmpData < HBLANK_MIN then
-                                    report "Value under minimal Horizontal Blank value. Defaulting to minimum." severity warning;
+                                    report "Value under minimal Horizontal Blank value. Defaulting to minimum."
+                                    severity warning;
                                     tmpData := HBLANK_MIN;
                                 end if;
                                 paramsReg.hblank <= tmpData;
@@ -206,10 +247,12 @@ begin
                         when REG_ADDR.vblank =>
                             tmpData := to_integer(unsigned(dataIn));
                             if tmpData < 8 or tmpData > 2047 then
-                                report "Invalid value range. Legal range: [8 - 2047]." severity warning;
+                                report "Invalid value range. Legal range: [8 - 2047]."
+                                severity warning;
                             else
                                 if tmpData < VBLANK_MIN then
-                                    report "Value under minimal Vertical Blank value. Defaulting to minimum." severity warning;
+                                    report "Value under minimal Vertical Blank value. Defaulting to minimum."
+                                    severity warning;
                                     tmpData := VBLANK_MIN;
                                 end if;
                                 paramsReg.vblank <= tmpData;
@@ -220,10 +263,11 @@ begin
                             paramsReg.rowMirror <= logicToBool(dataIn(15));
                             -- mirror column
                             paramsReg.colMirror <= logicToBool(dataIn(14));
+                            debugPrint("ReadMode2 register updated. Using only upper 2 bits.");
 
                         when others =>
-                            report "Register: 0x" & to_hstring(dataAddrIn) &
-                            " currently not implemented" severity warning;
+                            report "Register: 0x" & to_hstring(dataAddrIn) & " currently not implemented"
+                            severity warning;
                     end case;
                 end if;
             end if;

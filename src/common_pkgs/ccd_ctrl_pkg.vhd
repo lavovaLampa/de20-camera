@@ -17,7 +17,7 @@ package ccd_ctrl_pkg is
     type Stage_Out is array (1 downto 0) of Pipeline_Pixel;
     type Pipeline_Matrix is array (2 downto 0, 2 downto 0) of Pipeline_Pixel;
 
-    pure function getCurrColor(currWidth : Img_Width_Range; currHeight : Img_Height_Range) return CCD_Pixel_Color_T;
+    pure function getCurrColor(height : Img_Height_Range; width : Img_Width_Range) return CCD_Pixel_Color_T;
 end package ccd_ctrl_pkg;
 
 package body ccd_ctrl_pkg is
@@ -39,7 +39,7 @@ package body ccd_ctrl_pkg is
         end if;
     end function decodeColor;
 
-    pure function currColorAbsolute(currWidth : CCD_Width_Range; currHeight : CCD_Height_Range; isMirrored : boolean)
+    pure function currColorAbsolute(currHeight : CCD_Height_Range; currWidth : CCD_Width_Range; isMirrored : boolean)
     return CCD_Pixel_Color_T is
         variable isEvenRow    : boolean := currHeight mod 2 = 0;
         variable isEvenColumn : boolean := currWidth mod 2 = 0;
@@ -51,11 +51,11 @@ package body ccd_ctrl_pkg is
         end if;
     end function currColorAbsolute;
 
-    pure function getCurrColor(currWidth : Img_Width_Range; currHeight : Img_Height_Range)
+    pure function getCurrColor(height : Img_Height_Range; width : Img_Width_Range)
     return CCD_Pixel_Color_T is
-        variable absoluteWidth  : CCD_Width_Range  := IMG_CONSTS.width_start + currWidth;
-        variable absoluteHeight : CCD_Height_Range := IMG_CONSTS.height_start + currHeight;
+        variable absoluteWidth  : CCD_Width_Range  := IMG_CONSTS.width_start + width;
+        variable absoluteHeight : CCD_Height_Range := IMG_CONSTS.height_start + height;
     begin
-        return currColorAbsolute(absoluteWidth, absoluteHeight, IMG_CONSTS.is_mirrored);
+        return currColorAbsolute(absoluteHeight, absoluteWidth, IMG_CONSTS.is_mirrored);
     end function getCurrColor;
 end package body ccd_ctrl_pkg;

@@ -48,6 +48,7 @@ package ccd_model_pkg is
     );
 
     pure function logicToBool(val : std_logic) return boolean;
+    pure function boolToLogic(val : boolean) return std_logic;
 end package ccd_model_pkg;
 
 package body ccd_model_pkg is
@@ -60,5 +61,14 @@ package body ccd_model_pkg is
             return false;
         end if;
     end function logicToBool;
+
+    pure function boolToLogic(val : boolean) return std_logic is
+    begin
+        if val then
+            return '1';
+        else
+            return '0';
+        end if;
+    end function boolToLogic;
 
 end package body ccd_model_pkg;
