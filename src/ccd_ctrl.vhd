@@ -1,14 +1,14 @@
 library ieee;
 use ieee.std_logic_1164.all;
 use ieee.numeric_std.all;
-use work.ccd_pkg.all;
+use work.ccd_ctrl_pkg.all;
 use work.common_pkg.all;
 
 entity ccd_ctrl is
     port(
         clkIn, rstAsyncIn          : in  std_logic;
         frameValidIn, lineValidIn  : in  std_logic;
-        pixelDataIn                : in  Ccd_Pixel_Data;
+        pixelDataIn                : in  CCD_Pixel_Data_T;
         pixelOut                   : out Pixel_Aggregate;
         pixelValidOut, frameEndOut : out boolean
     );
@@ -29,11 +29,11 @@ architecture RTL of ccd_ctrl is
     signal hasNewPixel, frameEnd : boolean           := false;
 
     -- demosaicStage1 (API)
-    signal color1Out, color2Out : Stage_Out       := (others => (others => '0'));
-    signal color3Out            : Pixel_Data      := B"0000_0000";
-    signal stageFrameEnd        : boolean         := false;
-    signal stageColor           : Ccd_Pixel_Color := Green1;
-    signal pipelineReady        : boolean         := false;
+    signal color1Out, color2Out : Stage_Out         := (others => (others => '0'));
+    signal color3Out            : Pixel_Data        := B"0000_0000";
+    signal stageFrameEnd        : boolean           := false;
+    signal stageColor           : CCD_Pixel_Color_T := Green1;
+    signal pipelineReady        : boolean           := false;
 
     impure function isImageEdge return boolean is
     begin
@@ -83,8 +83,8 @@ begin
     end process shiftProc;
 
     demosaicStage1 : process(clkIn, rstAsyncIn)
-        variable currColor     : Ccd_Pixel_Color := getCurrColor(currShiftWidth, currShiftHeight);
-        variable resizedMatrix : Pipeline_Matrix := (others => (others => (others => '0')));
+        variable currColor     : CCD_Pixel_Color_T := Green1;
+        variable resizedMatrix : Pipeline_Matrix   := (others => (others => (others => '0')));
     begin
         if rstAsyncIn = '1' then
             pipelineReady <= false;
@@ -94,7 +94,7 @@ begin
             color3Out     <= (others => '0');
             stageFrameEnd <= false;
         elsif rising_edge(clkIn) then
-            currColor := getCurrColor(currShiftWidth, currShiftHeight);
+            currColor := getCurrColor(currShiftHeight, currShiftWidth);
 
             -- ignore image edges
             pipelineReady <= hasNewPixel and not isImageEdge;

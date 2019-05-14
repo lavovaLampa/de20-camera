@@ -40,7 +40,7 @@ $(WORKDIR) :
 .PHONY : ccd_ctrl
 ccd_ctrl : $(GHDL_LIB_INFO) $(LIBS) $(TB_DIR)/ccd_ctrl_tb.vhd $(SRC_DIR)/ccd_ctrl.vhd
 	$(GHDL_CMD) -m $(ELABORATE_OPTS) --workdir=$(WORKDIR) ccd_ctrl_tb
-	$(GHDL_CMD) -r $(RUN_OPTS) --workdir=$(WORKDIR) ccd_ctrl_tb $(GHW_OPTS)
+	$(GHDL_CMD) -r $(RUN_OPTS) --workdir=$(WORKDIR) ccd_ctrl_tb $(GHW_OPTS) --read-wave-opt=$(TB_DIR)/ccd_ctrl_tb_ghw_opts.txt
 
 .PHONY : color_kernel
 color_kernel : $(GHDL_LIB_INFO) $(LIBS) $(TB_DIR)/color_kernel_tb.vhd $(SRC_DIR)/color_kernel.vhd $(SRC_DIR)/pixel_shiftreg.vhd
@@ -64,4 +64,4 @@ show-wave : $(WORKDIR)/$(VCD_OUT_NAME)
 .PHONY : clean
 clean :
 	$(GHDL_CMD) --clean --workdir=$(WORKDIR)
-	rm $(GHDL_LIB_INFO) $(WORKDIR)/wave_out.*
+	rm $(GHDL_LIB_INFO) $(WORKDIR)/wave_out.* $(WORKDIR)/*.o ./*.o

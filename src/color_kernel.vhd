@@ -210,7 +210,6 @@ begin
         port map(
             clkIn      => clkIn,
             rstAsyncIn => rstAsyncIn,
-            -- TODO: parametrize
             dataIn     => pixelIn(Red),
             enableIn   => newPixelIn,
             pixelsOut  => pixelMatrix(Red)
@@ -224,7 +223,6 @@ begin
         port map(
             clkIn      => clkIn,
             rstAsyncIn => rstAsyncIn,
-            -- TODO: parametrize
             dataIn     => pixelIn(Green),
             enableIn   => newPixelIn,
             pixelsOut  => pixelMatrix(Green)
@@ -238,7 +236,6 @@ begin
         port map(
             clkIn      => clkIn,
             rstAsyncIn => rstAsyncIn,
-            -- TODO: parametrize
             dataIn     => pixelIn(Blue),
             enableIn   => newPixelIn,
             pixelsOut  => pixelMatrix(Blue)
