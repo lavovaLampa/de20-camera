@@ -4,21 +4,20 @@ use ieee.numeric_std.all;
 use std.textio.all;
 
 package sdram_pkg is
+    constant BANK_COUNT : natural := 4;
 
     type State_T is (ACT, A_REF, BST, LMR, NOP, PRECH, READ, READ_A, WRITE, WRITE_A, LOAD_FILE, DUMP_FILE);
     type Command_T is (ActiveEna, ArefEna, BurstTerm, ModeRegEna, PrechargeEna, ReadEna, WriteEna, NoOp);
     type Burst_Length_T is ('1', '2', '4', '8', FullPage, InvalidLength);
     type Latency_Mode_T is ('2', '3', InvalidLatency);
+    type Array4xBool is array (BANK_COUNT - 1 downto 0) of boolean;
     type Array4xI IS ARRAY (3 DOWNTO 0) OF INTEGER;
     type Array4xT IS ARRAY (3 DOWNTO 0) OF TIME;
     type Array4xB IS ARRAY (3 DOWNTO 0) OF BIT;
     type Array4x2BV IS ARRAY (3 DOWNTO 0) OF BIT_VECTOR(1 DOWNTO 0);
     type Array_state IS ARRAY (4 DOWNTO 0) OF State_T;
 
-    constant PAGE_WIDTH : natural := 255;
-
     function toBool(val : bit) return boolean;
-    function burstToNatural(val : Burst_Length_T) return natural;
     function To_StdLogic(s : bit) return std_logic;
     function TO_INTEGER(input : std_logic) return integer;
     function TO_INTEGER(input : bit_vector) return integer;
@@ -28,18 +27,6 @@ package sdram_pkg is
 END sdram_pkg;
 
 PACKAGE BODY sdram_pkg IS
-
-    function burstToNatural(val : Burst_Length_T) return natural is
-    begin
-        case val is
-            when '1'           => return 1;
-            when '2'           => return 2;
-            when '4'           => return 4;
-            when '8'           => return 8;
-            when FullPage      => return PAGE_WIDTH;
-            when InvalidLength => return 1;
-        end case;
-    end function burstToNatural;
 
     function toBool(val : bit) return boolean is
     begin
