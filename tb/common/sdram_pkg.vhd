@@ -17,7 +17,8 @@ package sdram_pkg is
     type Array4x2BV IS ARRAY (3 DOWNTO 0) OF BIT_VECTOR(1 DOWNTO 0);
     type Array_state IS ARRAY (4 DOWNTO 0) OF State_T;
 
-    function toBool(val : bit) return boolean;
+    pure function toBool(val : bit) return boolean;
+    pure function toBool(val : std_logic) return boolean;
     function To_StdLogic(s : bit) return std_logic;
     function TO_INTEGER(input : std_logic) return integer;
     function TO_INTEGER(input : bit_vector) return integer;
@@ -27,6 +28,14 @@ package sdram_pkg is
 END sdram_pkg;
 
 PACKAGE BODY sdram_pkg IS
+
+    pure function toBool(val : std_logic) return boolean is
+    begin
+        case val is
+            when '1'    => return true;
+            when others => return false;
+        end case;
+    end function toBool;
 
     function toBool(val : bit) return boolean is
     begin

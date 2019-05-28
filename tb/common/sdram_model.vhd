@@ -66,23 +66,23 @@ END sdram_model;
 architecture behave of sdram_model is
     type Array4xUnsigned is array (BANK_COUNT - 1 downto 0) of unsigned(COL_BITS - 1 downto 0);
     --    signal currOp                                    : State_T                            := NOP;
-    signal modeReg                                   : bit_vector(ADDR_BITS - 1 downto 0) := (others => '0'); -- RAM mode register
-    signal rowAddrStrobe, colAddrStrobe, writeEnable : bit                                := '0'; -- decoded signals
-    signal RAS_clk, Sys_clk, CkeZ                    : bit                                := '0';
-    signal currCommand                               : Command_T                          := ModeRegEna; -- decoded currently requested command
-    signal burstMode                                 : Burst_Length_T                     := '1'; -- decoded burst length setting
-    signal burstInterleaved                          : boolean                            := false; -- decoded burst interleaved setting
-    signal commandAggregate                          : bit_vector(2 downto 0)             := "000"; -- temp aggregate signal
-    signal latencyMode                               : Latency_Mode_T                     := '2'; -- decoded latency mode setting
-    signal writeBurstEnabled                         : boolean                            := false; -- decoded write burst enabled setting
-    signal burstLength                               : natural                            := 1; -- decoded burst length as natural number
-    signal prechargeFlag                             : boolean                            := false; -- addrIn(10) [flaged used in various ways, controlling precharge]
+    signal modeReg                                   : std_logic_vector(ADDR_BITS - 1 downto 0) := (others => '0'); -- RAM mode register
+    signal rowAddrStrobe, colAddrStrobe, writeEnable : bit                                      := '0'; -- decoded signals
+    signal RAS_clk, Sys_clk, CkeZ                    : bit                                      := '0';
+    signal currCommand                               : Command_T                                := ModeRegEna; -- decoded currently requested command
+    signal burstMode                                 : Burst_Length_T                           := '1'; -- decoded burst length setting
+    signal burstInterleaved                          : boolean                                  := false; -- decoded burst interleaved setting
+    signal commandAggregate                          : bit_vector(2 downto 0)                   := "000"; -- temp aggregate signal
+    signal latencyMode                               : Latency_Mode_T                           := '2'; -- decoded latency mode setting
+    signal writeBurstEnabled                         : boolean                                  := false; -- decoded write burst enabled setting
+    signal burstLength                               : natural                                  := 1; -- decoded burst length as natural number
+    signal prechargeFlag                             : boolean                                  := false; -- addrIn(10) [flaged used in various ways, controlling precharge]
 
     -- Checking internal wires
     signal prechargeCheck        : Array4xBool                      := (others => false);
     signal activeCheck           : Array4xBool                      := (others => false);
     signal Dq_in_chk, Dq_out_chk : boolean                          := false;
-    signal bankCheck             : bit_vector(1 downto 0)           := "00";
+    signal bankCheck             : unsigned(1 downto 0)             := "00";
     signal rowCheck              : unsigned(ADDR_BITS - 1 downto 0) := (others => '0');
     signal colCheck              : unsigned(COL_BITS - 1 downto 0)  := (others => '0');
 
@@ -447,7 +447,7 @@ begin
 
                 -- Load Mode Register
                 when ModeRegEna =>
-                    modeReg <= to_BitVector(addrIn);
+                    modeReg <= std_logic_vector(addrIn);
                     assert memBank(0).precharged and memBank(1).precharged and memBank(2).precharged and memBank(3).precharged
                     report "All bank must be Precharge before Load Mode Register"
                     severity warning;
@@ -731,19 +731,19 @@ begin
 
                     if index < 32 then
                         Bank_Load := unsigned(recaddr(25 downto 24));
-                        Rows_Load := recaddr(23 downto 11);
-                        Cols_Load := recaddr(10 downto 2);
+                        Rows_Load := unsigned(recaddr(23 downto 11));
+                        Cols_Load := unsigned(recaddr(10 downto 2));
                         initMem(Bank_Load, TO_INTEGER(Rows_Load));
                         for i in 0 to 3 loop
-                            memBank(to_integer(unsigned(to_StdLogicVector(Bank_Load)))).storage(to_integer(Rows_Load))(to_integer(Cols_Load) + i) := (inUse => true, data => recdata(i * 32 + index to i * 32 + index + 15));
+                            memBank(to_integer(Bank_Load)).storage(to_integer(Rows_Load))(to_integer(Cols_Load) + i) := (inUse => true, data => recdata(i * 32 + index to i * 32 + index + 15));
                         end loop;
                     else
-                        Bank_Load := recaddr(26 downto 25);
-                        Rows_Load := recaddr(24 downto 12);
-                        Cols_Load := recaddr(11 downto 3);
+                        Bank_Load := unsigned(recaddr(26 downto 25));
+                        Rows_Load := unsigned(recaddr(24 downto 12));
+                        Cols_Load := unsigned(recaddr(11 downto 3));
                         initMem(Bank_Load, TO_INTEGER(Rows_Load));
                         for i in 0 to 3 loop
-                            memBank(to_integer(unsigned(to_StdLogicVector(Bank_Load)))).storage(to_integer(Rows_Load))(to_integer(Cols_Load) + i) := (inUse => true, data => recdata(i * 64 + index - 32 to i * 64 + index - 32 + 15));
+                            memBank(to_integer(Bank_Load)).storage(to_integer(Rows_Load))(to_integer(Cols_Load) + i) := (inUse => true, data => recdata(i * 64 + index - 32 to i * 64 + index - 32 + 15));
                         end loop;
                     end if;
                 end if;
