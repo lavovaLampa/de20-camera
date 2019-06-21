@@ -5,37 +5,48 @@ use ieee.numeric_std.all;
 use work.sdram_pkg.all;
 use std.textio.all;
 
+-- TODO: check correct RAM initialization
+
 entity sdram_model is
     generic(
         -- Timing Parameters for -75 (PC133) and CAS Latency = 2
-        tAC        : time    := 6.0 ns;
-        tHZ        : time    := 7.0 ns;
-        tOH        : time    := 2.7 ns;
-        tMRD       : natural := 2;      -- 2 Clk Cycles
-        tRAS       : time    := 44.0 ns;
-        tRC        : time    := 66.0 ns;
-        tRCD       : time    := 20.0 ns;
-        tRP        : time    := 20.0 ns;
-        tRRD       : time    := 15.0 ns;
+        -- FIXME: fix this
+        tCAS       : time    := 0 ns;
+        tAC        : time    := 6.0 ns; -- access time from clk
+        tHZ        : time    := 7.0 ns; -- output high impedance time
+        tOH        : time    := 2.7 ns; -- output data hold time
+        tMRD       : natural := 2;      -- clock cycles between write to mode register and next command
+        tRAS       : time    := 44.0 ns; -- row address strobe (active to precharge)
+        tRC        : time    := 66.0 ns; -- row cycle (ref to ref / activate to activate)
+        tRCD       : time    := 20.0 ns; -- RAS to CAS delay (active command to read/write command delay time)
+        tRP        : time    := 20.0 ns; -- row precharge time (min. time between precharging row and activating new one)
+        tRRD       : time    := 15.0 ns; -- bank to bank delay time (min. time between successive ACTIVE commands to different banks)
         tWRa       : time    := 7.5 ns; -- A2 Version - Auto precharge mode only (1 Clk + 7.5 ns)
         tWRp       : time    := 15.0 ns; -- A2 Version - Precharge mode only (15 ns)
+        -- FIXME: implement 
+        tCKA       : time    := 0 ns;   -- CKE to CLK recovery delay time
 
-        tAH        : time    := 0.8 ns;
-        tAS        : time    := 1.5 ns;
-        --        tCH        : time    := 2.5 ns;
-        --        tCL        : time    := 2.5 ns;
-        --        tCK        : time    := 10.0 ns;
-        tDH        : time    := 0.8 ns;
-        tDS        : time    := 1.5 ns;
-        tCKH       : time    := 0.8 ns;
-        tCKS       : time    := 1.5 ns;
-        tCMH       : time    := 0.8 ns;
-        tCMS       : time    := 1.5 ns;
+        tAH        : time    := 0.8 ns; -- address hold time
+        tAS        : time    := 1.5 ns; -- address setup time
+        tCH        : time    := 2.5 ns; -- clk high level width
+        tCL        : time    := 2.5 ns; -- clk low level width
+        tCK        : time    := 10.0 ns; -- clk cycle time
+        tDH        : time    := 0.8 ns; -- input data hold time
+        tDS        : time    := 1.5 ns; -- input data setup time
+        tCKH       : time    := 0.8 ns; -- CKE hold time (clk enable?)
+        tCKS       : time    := 1.5 ns; -- CKE setup time
+        tCMH       : time    := 0.8 ns; -- command hold time
+        tCMS       : time    := 1.5 ns; -- command setup time
+
+        tREF       : time    := 64 ms;  -- refresh cycle time (4096)
+
         ADDR_BITS  : natural := 12;     -- row address width
         DATA_WIDTH : natural := 16;
         COL_BITS   : natural := 8;      -- page width (column width)
+
         index      : natural := 0;
-        fname      : string  := "ram.srec" -- File to read from
+        fname      : string  := "ram.srec"; -- File to read from
+        LOAD, DUMP : boolean := false
     );
     port(
         dataInOut     : inout std_logic_vector(DATA_WIDTH - 1 downto 0) := (others => 'Z');
@@ -50,7 +61,7 @@ entity sdram_model is
         dqmIn         : in    std_logic_vector(1 downto 0)              := "00" -- input/output mask
     );
     constant PAGE_WIDTH : natural := 2**COL_BITS;
-    function burstToNatural(val : Burst_Length_T) return natural is
+    pure function burst_to_natural(val : Burst_Length_T) return natural is
     begin
         case val is
             when '1'           => return 1;
@@ -60,23 +71,36 @@ entity sdram_model is
             when FullPage      => return PAGE_WIDTH;
             when InvalidLength => return 1;
         end case;
-    end function burstToNatural;
+    end function burst_to_natural;
+    pure function latency_to_natural(val : Latency_Mode_T) return natural is
+    begin
+        case val is
+            when '2'            => return 2;
+            when '3'            => return 3;
+            when InvalidLatency => return 2;
+        end case;
+    end function latency_to_natural;
+    subtype Col_Range_T is natural range 2**COL_BITS - 1 downto 0;
+    subtype Row_Range_T is natural range 2**ADDR_BITS - 1 downto 0;
+    subtype Bank_Range_T is natural range 3 downto 0;
 END sdram_model;
 
 architecture behave of sdram_model is
-    type Array4xUnsigned is array (BANK_COUNT - 1 downto 0) of unsigned(COL_BITS - 1 downto 0);
-    --    signal currOp                                    : State_T                            := NOP;
-    signal modeReg                                   : std_logic_vector(ADDR_BITS - 1 downto 0) := (others => '0'); -- RAM mode register
-    signal rowAddrStrobe, colAddrStrobe, writeEnable : bit                                      := '0'; -- decoded signals
-    signal RAS_clk, Sys_clk, CkeZ                    : bit                                      := '0';
-    signal currCommand                               : Command_T                                := ModeRegEna; -- decoded currently requested command
-    signal burstMode                                 : Burst_Length_T                           := '1'; -- decoded burst length setting
-    signal burstInterleaved                          : boolean                                  := false; -- decoded burst interleaved setting
-    signal commandAggregate                          : bit_vector(2 downto 0)                   := "000"; -- temp aggregate signal
-    signal latencyMode                               : Latency_Mode_T                           := '2'; -- decoded latency mode setting
-    signal writeBurstEnabled                         : boolean                                  := false; -- decoded write burst enabled setting
-    signal burstLength                               : natural                                  := 1; -- decoded burst length as natural number
-    signal prechargeFlag                             : boolean                                  := false; -- addrIn(10) [flaged used in various ways, controlling precharge]
+    signal rowAddrStrobe, colAddrStrobe, writeEnable : bit := '0'; -- decoded signals
+
+    signal currCommand : Command_T                                := ModeRegEna; -- decoded currently requested command
+    signal modeReg     : std_logic_vector(ADDR_BITS - 1 downto 0) := (others => '0'); -- RAM mode register
+
+    signal clkEnabled          : boolean                := false;
+    signal clkInternal, clkRas : std_logic              := '0';
+    signal burstMode           : Burst_Length_T         := '1'; -- decoded burst length setting
+    signal burstInterleaved    : boolean                := false; -- decoded burst interleaved setting
+    signal commandAggregate    : bit_vector(2 downto 0) := "000"; -- temp aggregate signal
+    signal latencyMode         : Latency_Mode_T         := '2'; -- decoded latency mode setting
+    signal latencyLength       : natural                := 2; -- decoded latency mode as natural number
+    signal writeBurstEnabled   : boolean                := false; -- decoded write burst enabled setting
+    signal burstLength         : natural                := 1; -- decoded burst length as natural number
+    signal prechargeFlag       : boolean                := false; -- addrIn(10) [flag used in various ways, controlling precharge]
 
     -- Checking internal wires
     signal prechargeCheck        : Array4xBool                      := (others => false);
@@ -132,15 +156,16 @@ begin
             InvalidLatency when others;
 
     writeBurstEnabled <= not toBool(modeReg(9));
-    burstLength       <= burstToNatural(burstMode);
+    burstLength       <= burst_to_natural(burstMode);
+    latencyLength     <= latency_to_natural(latencyMode);
 
     -- RAS Clock for checking tWR and tRP
     secondaryClkProc : process
         variable Clk0, Clk1 : integer := 0;
     begin
-        RAS_clk <= '1';
+        clkRas <= '1';
         wait for 0.5 ns;
-        RAS_clk <= '0';
+        clkRas <= '0';
         wait for 0.5 ns;
         if Clk0 > 100 or Clk1 > 100 then
             wait;
@@ -158,26 +183,41 @@ begin
     -- System Clock
     clkProc : process(clkIn)
     begin
-        if clkIn'last_value = '0' and clkIn = '1' then
-            CkeZ <= to_bit(clkEnableIn, '1');
+        if rising_edge(clkIn) then
+            clkEnabled <= toBool(clkEnableIn);
         end if;
-        Sys_clk <= CkeZ and to_bit(clkIn, '0');
     end process clkProc;
 
-    stateProc : process
-        -- NOTE: The extra bits in RAM_TYPE is for checking memory access.  A logic 1 means
-        --       the location is in use.  This will be checked when doing memory DUMP.
-        type Mem_Data_R is record
-            data  : bit_vector(DATA_WIDTH - 1 downto 0);
-            inUse : boolean;
-        end record Mem_Data_R;
-        type Ram_Page_t is array (2**COL_BITS - 1 downto 0) of Mem_Data_R;
-        type Ram_Ptr_T is access Ram_Page_t;
-        type Ram_Bank_T is array (2**ADDR_BITS - 1 downto 0) of Ram_Ptr_T;
-        type Bank_Info_R is record
-            storage        : Ram_Bank_T;
-            precharged     : boolean;
-            active         : boolean;
+    with clkEnabled select clkInternal <=
+        clkIn when true,
+        '0' when others;
+
+    initCheckProc : process(clkInternal)
+        variable initSucc : boolean := false;
+    begin
+        if rising_edge(clkInternal) then
+            if not initSucc then
+                -- FIXME: check initialization
+            end if;
+        end if;
+    end process initCheckProc;
+
+    tmpBlock : block
+        --        type Array4xUnsigned is array (BANK_COUNT - 1 downto 0) of unsigned(COL_BITS - 1 downto 0);
+        type Col_Pipeline_T is array (3 downto 0) of unsigned(Col_Range_T);
+        type Bank_Pipeline_T is array (3 downto 0) of unsigned(1 downto 0);
+        type Command_Pipeline_T is array (3 downto 0) of Command_T;
+        type Boolean_Pipeline_T is array (3 downto 0) of boolean;
+        type Mem_Pipeline_R is record
+            cmd           : Command_Pipeline_T;
+            colAddr       : Col_Pipeline_T;
+            bankAddr      : Bank_Pipeline_T;
+            bankPrecharge : Bank_Pipeline_T;
+            a10Precharge  : Boolean_Pipeline_T;
+        end record Mem_Pipeline_R;
+        type Bank_State_T is (Idle, Activating, Precharging, Active);
+        type Mem_Bank_R is record
+            state          : Bank_State_T;
             rowAddr        : unsigned(ADDR_BITS - 1 downto 0);
             rasCheck       : time;
             rcdCheck       : time;
@@ -188,8 +228,438 @@ begin
             countPrecharge : natural;
             readPrecharge  : boolean;
             writePrecharge : boolean;
-        end record Bank_Info_R;
-        type Bank_Array_T is array (3 downto 0) of Bank_Info_R;
+        end record Mem_Bank_R;
+        type Bank_Array_T is array (3 downto 0) of Mem_Bank_R;
+
+        -- TODO: initial value
+        signal pipeline : Mem_Pipeline_R;
+        signal memBank  : Bank_Array_T;
+    begin
+        frontProc : process(clkInternal)
+            variable bankPtr, addrPtr : natural;
+        begin
+            if rising_edge(clkInternal) then
+                bankPtr := to_integer(unsigned(bankIn));
+                addrPtr := to_integer(unsigned(addrIn));
+
+                -- Internal Command Pipeline
+                pipeline.cmd(2 downto 0) <= pipeline.cmd(3 downto 1);
+                pipeline.cmd(3)          <= NoOp;
+
+                pipeline.colAddr(2 downto 0) <= pipeline.colAddr(3 downto 1);
+                pipeline.colAddr(3)          <= (others => '0');
+
+                pipeline.bankAddr(2 downto 0) <= pipeline.bankAddr(3 downto 1);
+                pipeline.bankAddr(3)          <= "00";
+
+                pipeline.bankPrecharge(2 downto 0) <= pipeline.bankPrecharge(3 downto 1);
+                pipeline.bankPrecharge(3)          <= "00";
+
+                pipeline.a10Precharge(2 downto 0) <= pipeline.a10Precharge(3 downto 1);
+                pipeline.a10Precharge(3)          <= false;
+
+                -- Dqm pipeline for Read
+                -- TODO: what to do with this?
+                Dqm_reg0 := Dqm_reg1;
+                Dqm_reg1 := TO_BITVECTOR(dqmIn);
+
+                -- Read or Write with Auto Precharge Counter
+                for i in 0 to 3 loop
+                    if memBank(i).autoPrecharge then
+                        memBank(i).countPrecharge <= memBank(i).countPrecharge + 1;
+                    end if;
+                end loop;
+
+                -- Auto Precharge Timer for tWR
+                if writeBurstEnabled then
+                    for i in 0 to 3 loop
+                        if memBank(i).countPrecharge = 1 then
+                            memBank(i).countTime <= NOW;
+                        end if;
+                    end loop;
+                else
+                    for i in 0 to 3 loop
+                        if memBank(i).countPrecharge = burstLength then
+                            memBank(i).countTime <= NOW;
+                        end if;
+                    end loop;
+                end if;
+
+                -- tMRD Counter
+                MRD_chk := MRD_chk + 1;
+
+                -- tWR Counter
+                for i in 0 to 3 loop
+                    WR_counter(i) := WR_counter(i) + 1;
+                end loop;
+
+                --------------------------------------------------------------------------------
+                -- ######## ########   #######  ##    ## ######## ######## ##    ## ########  -- 
+                -- ##       ##     ## ##     ## ###   ##    ##    ##       ###   ## ##     ## -- 
+                -- ##       ##     ## ##     ## ####  ##    ##    ##       ####  ## ##     ## -- 
+                -- ######   ########  ##     ## ## ## ##    ##    ######   ## ## ## ##     ## -- 
+                -- ##       ##   ##   ##     ## ##  ####    ##    ##       ##  #### ##     ## -- 
+                -- ##       ##    ##  ##     ## ##   ###    ##    ##       ##   ### ##     ## -- 
+                -- ##       ##     ##  #######  ##    ##    ##    ######## ##    ## ########  -- 
+                --------------------------------------------------------------------------------
+
+                case currCommand is
+                    -- Active Block (latch Bank and Row Address)
+                    when ActiveEna =>
+                        --                        if memBank(bankPtr).precharged then
+                        if memBank(bankPtr).state = Idle then
+                            memBank(bankPtr).state    <= Activating;
+                            --                            memBank(bankPtr).active     := true;
+                            --                            memBank(bankPtr).precharged := false;
+                            memBank(bankPtr).rowAddr  <= unsigned(addrIn);
+                            memBank(bankPtr).rcdCheck <= NOW;
+                            memBank(bankPtr).rasCheck <= NOW;
+                            -- Precharge to Active Bank 0
+                            assert (NOW - memBank(bankPtr).rpCheck >= tRP)
+                            report "tRP violation during Activate Bank " & natural'image(bankPtr)
+                            severity warning;
+                        else
+                            report "Bank " & natural'image(bankPtr) & " is not Idle, cannot be Activated"
+                            severity warning;
+                        end if;
+
+                        -- Active Bank A to Active Bank B
+                        if ((Previous_bank /= unsigned(bankIn)) and (NOW - RRD_chk < tRRD)) then
+                            report "tRRD violation during Activate"
+                            severity warning;
+                        end if;
+                        -- LMR to ACT
+                        assert (MRD_chk >= tMRD)
+                        report "tMRD violation during Activate"
+                        severity warning;
+                        -- AutoRefresh to Activate
+                        assert (NOW - RC_chk >= tRC)
+                        report "tRC violation during Activate"
+                        severity warning;
+                        -- Record variable for checking violation
+                        RRD_chk       := NOW;
+                        Previous_bank := unsigned(bankIn);
+
+                    -- Auto Refresh
+                    when ArefEna =>
+                        -- Auto Refresh to Auto Refresh
+                        assert (NOW - RC_chk >= tRC)
+                        report "tRC violation during Auto Refresh"
+                        severity warning;
+                        -- Precharge to Auto Refresh
+                        assert (NOW - memBank(0).rpCheck >= tRP or NOW - memBank(1).rpCheck >= tRP or NOW - memBank(2).rpCheck >= tRP or NOW - memBank(3).rpCheck >= tRP)
+                        report "tRP violation during Auto Refresh"
+                        severity warning;
+                        -- All banks must be idle before refresh
+                        -- FIXME: is this right?
+                        --                assert Pc_b3 = '0' OR Pc_b2 = '0' OR Pc_b1 = '0' OR Pc_b0 = '0'
+                        assert memBank(0).state = Idle and memBank(1).state = Idle and memBank(2).state = Idle and memBank(3).state = Idle
+                        report "All banks must be Precharge before Auto Refresh"
+                        severity warning;
+                        -- Record current tRC time
+                        RC_chk := NOW;
+
+                    -- Burst Terminate
+                    when BurstTerm =>
+                        -- Terminate a Write immediately
+                        if dataInEnable then
+                            dataInEnable := false;
+                        end if;
+                        -- Terminate a Read depending on CAS Latency
+                        if latencyMode = '3' then
+                            cmdPipeline(2) := BST;
+                        elsif latencyMode = '2' then
+                            cmdPipeline(1) := BST;
+                        end if;
+
+                    -- Load Mode Register
+                    when ModeRegEna =>
+                        modeReg <= std_logic_vector(addrIn);
+
+                        assert memBank(0).state = Idle and memBank(1).state = Idle and memBank(2).state = Idle and memBank(3).state = Idle
+                        report "All bank must be Precharged before Load Mode Register"
+                        severity warning;
+                        -- REF to LMR
+                        assert (NOW - RC_chk >= tRC)
+                        report "tRC violation during Load Mode Register"
+                        severity warning;
+                        -- LMR to LMR
+                        assert (MRD_chk >= tMRD)
+                        report "tMRD violation during Load Mode Register"
+                        severity warning;
+                        -- Record current tMRD time
+                        MRD_chk := 0;
+
+                    -- Precharge Block
+                    when PrechargeEna =>
+                        if prechargeFlag then -- precharge all banks
+                            for i in Bank_Range_T loop
+                                memBank(i).state   <= Precharging;
+                                memBank(i).rpCheck <= NOW;
+                            end loop;
+                            -- Activate to Precharge all banks
+                            --                        assert ((NOW - RAS_chk0 >= tRAS) or (NOW - RAS_chk1 >= tRAS))
+                            assert (NOW - memBank(0).rasCheck >= tRAS) and (NOW - memBank(1).rasCheck >= tRAS) and (NOW - memBank(2).rasCheck >= tRAS) and (NOW - memBank(3).rasCheck >= tRAS)
+                            report "tRAS violation during Precharge all banks"
+                            severity warning;
+                            -- tWR violation check for Write
+                            if ((NOW - memBank(0).wrCheckpoint < tWRp) or (NOW - memBank(1).wrCheckpoint < tWRp) or (NOW - memBank(2).wrCheckpoint < tWRp) OR (NOW - memBank(3).wrCheckpoint < tWRp)) then
+                                report "tWR violation during Precharge ALL banks"
+                                severity warning;
+                            end if;
+                        else            -- precharge only selected bank
+                            assert memBank(bankPtr).state = Active
+                            report "Tried to Precharge row that's not Active"
+                            severity warning;
+
+                            memBank(bankPtr).state   <= Precharging;
+                            memBank(bankPtr).rpCheck <= NOW;
+
+                            -- Activate to Precharge bank
+                            assert (NOW - memBank(bankPtr).rasCheck >= tRAS)
+                            report "tRAS violation during Precharge bank " & natural'image(bankPtr)
+                            severity warning;
+                            -- tWR violation check for Write
+                            assert (NOW - memBank(bankPtr).wrCheckpoint >= tWRp)
+                            report "tWR violation during Precharge"
+                            severity warning;
+                        end if;
+
+                        -- Terminate a Write Immediately (if same bank or all banks)
+                        if (dataInEnable and (Bank = unsigned(bankIn) or prechargeFlag)) then
+                            dataInEnable := false;
+                        end if;
+
+                        -- Precharge Command Pipeline for READ
+                        if latencyMode = '3' then
+                            pipeline.cmd(2)           <= PrechargeEna;
+                            pipeline.bankPrecharge(2) <= unsigned(bankIn);
+                            pipeline.a10Precharge(2)  := TO_BIT(addrIn(10));
+                        elsif latencyMode = '2' then
+                            pipeline.cmd(1)          <= PrechargeEna;
+                            bankPrechargePipeline(1) := unsigned(bankIn);
+                            A10_precharge(1)         := TO_BIT(addrIn(10));
+                        end if;
+
+                    -- Read, Write, Column Latch
+                    when ReadEna | WriteEna =>
+                        -- Check to see if bank is open (ACT) for Read or Write
+                        assert not memBank(bankPtr).precharged
+                        report "Cannot Read or Write - Bank is not Activated"
+                        severity warning;
+
+                        -- Activate to Read or Write
+                        assert NOW - memBank(bankPtr).rcdCheck >= tRCD
+                        report "tRCD violation during Read or Write to Bank " & natural'image(bankPtr)
+                        severity warning;
+
+                        -- Read Command
+                        if currCommand = ReadEna then
+                            -- CAS Latency Pipeline
+                            if latencyMode = '3' then
+                                -- TODO: find out what this flag controls during READ
+                                if prechargeFlag then
+                                    cmdPipeline(2) := READ_A;
+                                else
+                                    cmdPipeline(2) := READ;
+                                end if;
+                                colAddrPipeline(2)  := unsigned(addrIn(COL_BITS - 1 DOWNTO 0));
+                                bankAddrPipeline(2) := unsigned(bankIn);
+                            elsif latencyMode = '2' then
+                                if prechargeFlag then
+                                    cmdPipeline(1) := READ_A;
+                                else
+                                    cmdPipeline(1) := READ;
+                                end if;
+                                colAddrPipeline(1)  := unsigned(addrIn(COL_BITS - 1 DOWNTO 0));
+                                bankAddrPipeline(1) := unsigned(bankIn);
+                            end if;
+
+                            -- Read intterupt a Write (terminate Write immediately)
+                            if dataInEnable then
+                                dataInEnable := false;
+                            end if;
+
+                        -- Write Command
+                        elsif currCommand = WriteEna then
+                            if prechargeFlag then
+                                cmdPipeline(0) := WRITE_A;
+                            else
+                                cmdPipeline(0) := WRITE;
+                            end if;
+                            colAddrPipeline(0)  := unsigned(addrIn(COL_BITS - 1 downto 0));
+                            bankAddrPipeline(0) := unsigned(bankIn);
+
+                            -- Write intterupts a Write (terminate Write immediately)
+                            if dataInEnable then
+                                dataInEnable := false;
+                            end if;
+
+                            -- Write interrupts a Read (terminate Read immediately)
+                            if dataOutEnable then
+                                dataOutEnable := false;
+                            end if;
+                        end if;
+
+                        -- Interrupt a Write with Auto Precharge
+                        if memBank(to_integer(RW_interrupt_bank)).autoPrecharge and memBank(to_integer(RW_interrupt_bank)).writePrecharge then
+                            RW_interrupt_write(TO_INTEGER(RW_Interrupt_Bank)) := '1';
+                        end if;
+
+                        -- Interrupt a Read with Auto Precharge
+                        if memBank(to_integer(RW_interrupt_bank)).autoPrecharge and memBank(to_integer(RW_interrupt_bank)).readPrecharge then
+                            RW_interrupt_read(TO_INTEGER(RW_Interrupt_Bank)) := '1';
+                        end if;
+
+                        -- Read or Write with Auto Precharge
+                        if prechargeFlag then
+                            bankPtr                         := to_integer(unsigned(bankIn));
+                            memBank(bankPtr).autoPrecharge  := true;
+                            memBank(bankPtr).countPrecharge := 0;
+                            RW_Interrupt_Bank               := unsigned(bankIn);
+                            if currCommand = ReadEna then
+                                memBank(bankPtr).readPrecharge := true;
+                            elsif currCommand = WriteEna then
+                                memBank(bankPtr).writePrecharge := true;
+                            end if;
+                        end if;
+
+                    when NoOp =>
+                        null;
+
+                    when CmdInhibit =>
+                        null;
+
+                end case;
+
+            end if;
+        end process frontProc;
+
+        backProc : process(clkInternal)
+        begin
+        end process backProc;
+
+        dataProc : process
+            type Mem_Data_R is record
+                data  : bit_vector(DATA_WIDTH - 1 downto 0);
+                inUse : boolean;
+            end record Mem_Data_R;
+            type Mem_Row_T is array (Col_Range_T) of Mem_Data_R;
+            type Mem_Row_Ptr_T is access Mem_Row_T;
+            type Mem_Bank_T is array (Row_Range_T) of Mem_Row_Ptr_T;
+            type Mem_Bank_Array_T is array (Bank_Range_T) of Mem_Bank_T;
+
+            variable bankData : Mem_Bank_Array_T := (others => (others => NULL));
+
+            -- Load and Dumb variables
+            file file_load                      : text open read_mode is fname; -- Data load
+            file file_dump                      : text open write_mode is "dumpdata.txt"; -- Data dump
+            variable currBank, currRow, currCol : natural;
+            --            variable data_load                  : std_logic_vector(DATA_WIDTH - 1 downto 0);
+            --            variable good_load                  : boolean;
+            variable l                          : line;
+            variable ch                         : character;
+            variable rectype                    : bit_vector(3 downto 0);
+            variable recaddr                    : std_logic_vector(31 downto 0);
+            variable reclen                     : bit_vector(7 downto 0);
+            variable recdata                    : bit_vector(0 to 16 * 8 - 1);
+
+            -- initialize empty rows
+            procedure initMem(bankSel : natural; rowSel : natural) is
+                variable currBank : Mem_Bank_T := bankData(bankSel);
+            begin
+                if currBank(rowSel) = null then -- check if row is uninitialized
+                    currBank(rowSel) := new Mem_Row_T; -- open row for access
+                    for i in Col_Range_T loop
+                        currBank(rowSel)(i) := (data => (others => '0'), inUse => false); -- fill with zeroes
+                    end loop;
+                end if;
+            end procedure initMem;
+        begin
+            if LOAD then
+                report "Reading memory array from file. This operation may take several minutes. Please wait..." severity note;
+                while not endfile(file_load) loop
+                    readline(file_load, l);
+                    read(l, ch);
+                    if (ch /= 'S') or (ch /= 's') then
+                        hread(l, rectype);
+                        hread(l, reclen);
+                        recaddr := (others => '0');
+
+                        case rectype is
+                            when "0001" =>
+                                hread(l, recaddr(15 downto 0));
+                            when "0010" =>
+                                hread(l, recaddr(23 downto 0));
+                            when "0011" =>
+                                hread(l, recaddr);
+                                recaddr(31 downto 24) := (others => '0');
+                            when others => next;
+                        end case;
+
+                        if L.all'length * 4 < recdata'length then
+                            hread(l, recdata(0 to L.all'length * 4 - 1));
+                        else
+                            hread(l, recdata);
+                        end if;
+
+                        if index < 32 then
+                            currBank := to_integer(unsigned(recaddr(25 downto 24)));
+                            currRow  := to_integer(unsigned(recaddr(23 downto 11)));
+                            currCol  := to_integer(unsigned(recaddr(10 downto 2)));
+                            initMem(currBank, currRow);
+                            for i in 0 to 3 loop
+                                bankData(currBank + i)(currRow)(currCol) := (inUse => true, data => recdata(i * 32 + index to i * 32 + index + 15));
+                            end loop;
+                        else
+                            currBank := to_integer(unsigned(recaddr(26 downto 25)));
+                            currRow  := to_integer(unsigned(recaddr(24 downto 12)));
+                            currCol  := to_integer(unsigned(recaddr(11 downto 3)));
+                            initMem(currBank, currRow);
+                            for i in 0 to 3 loop
+                                bankData(currBank)(currRow)(currCol + i) := (inUse => true, data => recdata(i * 64 + index - 32 to i * 64 + index - 32 + 15));
+                            end loop;
+                        end if;
+                    end if;
+                end loop;
+            end if;
+
+            if DUMP then
+                report "Writing memory array to file.  This operation may take several minutes.  Please wait..."
+                severity note;
+                write(l, string'("# Micron Technology, Inc. (FILE DUMP / MEMORY DUMP)"));
+                writeline(file_dump, l);
+                write(l, string'("# BA ROWS          COLS      DQ"));
+                writeline(file_dump, l);
+                write(l, string'("# -- ------------- --------- ----------------"));
+                writeline(file_dump, l);
+
+                -- dump all banks
+                for bank in 0 to BANK_COUNT - 1 loop
+                    for row in 0 to 2**ADDR_BITS - 1 loop
+                        -- Check if ROW is NULL
+                        if bankData(bank)(row) /= NULL then
+                            for col in 0 to 2**COL_BITS - 1 loop
+                                -- Check if COL is NULL
+                                next when not bankData(bank)(row)(col).inUse;
+                                write(l, to_string(to_unsigned(bank, 2)), right, 4);
+                                write(l, To_BitVector(Conv_Std_Logic_Vector(row, ADDR_BITS)), right, ADDR_BITS + 1);
+                                write(l, To_BitVector(Conv_std_Logic_Vector(col, COL_BITS)), right, COL_BITS + 1);
+                                write(l, bankData(bank)(row)(col).data, right, DATA_WIDTH + 1);
+                                writeline(file_dump, l);
+                            end loop;
+                        end if;
+                    end loop;
+                end loop;
+            end if;
+
+            wait until rising_edge(clkInternal);
+        end process dataProc;
+    end block tmpBlock;
+
+    stateProc : process
+        -- NOTE: The extra bits in RAM_TYPE is for checking memory access.  A logic 1 means
+        --       the location is in use.  This will be checked when doing memory DUMP.
 
         variable bankPtr : natural := 0;
 
@@ -197,8 +667,6 @@ begin
         variable rowIndex, colIndex : natural                         := 0;
         variable Dq_temp            : bit_vector(DATA_WIDTH downto 0) := (others => '0');
 
-        variable colAddrPipeline    : Array4xUnsigned;
-        variable bankAddrPipeline   : Array4xUnsigned;
         variable Dqm_reg0, Dqm_reg1 : bit_vector(1 downto 0) := "00";
 
         variable Bank, Previous_bank : unsigned(1 downto 0)             := "00";
@@ -207,7 +675,6 @@ begin
         variable currCol             : unsigned(COL_BITS - 1 downto 0)  := (others => '0');
         variable burstCounter        : natural                          := 0;
 
-        variable cmdPipeline           : Array_state;
         variable bankPrechargePipeline : Array4xUnsigned;
         variable A10_precharge         : Array4xB             := ('0' & '0' & '0' & '0');
         variable RW_interrupt_read     : Array4xB             := ('0' & '0' & '0' & '0');
@@ -222,38 +689,6 @@ begin
         variable WR_time         : Array4xT := (0 ns & 0 ns & 0 ns & 0 ns);
         --        variable WR_chkp         : Array4xT := (0 ns & 0 ns & 0 ns & 0 ns);
         variable RC_chk, RRD_chk : time     := 0 ns;
-
-        -- Load and Dumb variables
-        file file_load     : text open read_mode is fname; -- Data load
-        file file_dump     : text open write_mode is "dumpdata.txt"; -- Data dump
-        variable bank_load : unsigned(1 downto 0);
-        variable rows_load : unsigned(ADDR_BITS - 1 downto 0);
-        variable cols_load : unsigned(COL_BITS - 1 downto 0);
-        variable data_load : std_logic_vector(DATA_WIDTH - 1 downto 0);
-        variable good_load : boolean;
-        variable l         : line;
-        variable load      : std_logic := '1';
-        variable dump      : std_logic := '0';
-        variable ch        : character;
-        variable rectype   : bit_vector(3 downto 0);
-        variable recaddr   : std_logic_vector(31 downto 0);
-        variable reclen    : bit_vector(7 downto 0);
-        variable recdata   : bit_vector(0 to 16 * 8 - 1);
-
-        -- initialize empty rows
-        procedure initMem(bankSel : unsigned(1 downto 0); rowSel : natural) is
-            variable bPtr     : natural    := to_integer(bankSel);
-            variable currBank : Ram_Bank_T := memBank(bPtr).storage;
-        begin
-            if currBank(rowSel) = null then -- check if row is uninitialized
-                currBank(rowSel) := new Ram_Page_t; -- open row for access
-                for i in (2**COL_BITS - 1) downto 0 loop
-                    for j in data_width downto 0 loop
-                        currBank(rowSel)(i) := (data => (others => '0'), inUse => false); -- fill with zeroes
-                    end loop;
-                end loop;
-            end if;
-        end procedure initMem;
 
         -- Burst Counter
         procedure decodeBurst is
@@ -315,289 +750,8 @@ begin
         end procedure decodeBurst;
 
     begin
-        wait on Sys_clk, RAS_clk;
-        if rising_edge(Sys_clk) and Load = '0' and Dump = '0' then
-            -- Internal Command Pipeline
-            cmdPipeline(2 downto 0) := cmdPipeline(3 downto 1);
-            cmdPipeline(3)          := NOP;
-
-            colAddrPipeline(2 downto 0) := colAddrPipeline(3 downto 1);
-            colAddrPipeline(3)          := (others => '0');
-
-            bankAddrPipeline(2 downto 0) := bankAddrPipeline(3 downto 1);
-            bankAddrPipeline(3)          := "00";
-
-            bankPrechargePipeline(2 downto 0) := bankPrechargePipeline(3 downto 1);
-            bankPrechargePipeline(3)          := "00";
-
-            A10_precharge(2 downto 0) := A10_precharge(3 downto 1);
-            A10_precharge(3)          := '0';
-
-            -- Dqm pipeline for Read
-            Dqm_reg0 := Dqm_reg1;
-            Dqm_reg1 := TO_BITVECTOR(dqmIn);
-
-            -- Read or Write with Auto Precharge Counter
-            for i in 0 to 3 loop
-                if memBank(i).autoPrecharge then
-                    memBank(i).countPrecharge := memBank(i).countPrecharge + 1;
-                end if;
-            end loop;
-
-            -- Auto Precharge Timer for tWR
-            if writeBurstEnabled then
-                for i in 0 to 3 loop
-                    if memBank(i).countPrecharge = 1 then
-                        memBank(i).countTime := NOW;
-                    end if;
-                end loop;
-            else
-                for i in 0 to 3 loop
-                    if memBank(i).countPrecharge = burstLength then
-                        memBank(i).countTime := NOW;
-                    end if;
-                end loop;
-            end if;
-
-            -- tMRD Counter
-            MRD_chk := MRD_chk + 1;
-
-            -- tWR Counter
-            for i in 0 to 3 loop
-                WR_counter(i) := WR_counter(i) + 1;
-            end loop;
-
-            --------------------------------------------------------------------------------
-            -- ######## ########   #######  ##    ## ######## ######## ##    ## ########  -- 
-            -- ##       ##     ## ##     ## ###   ##    ##    ##       ###   ## ##     ## -- 
-            -- ##       ##     ## ##     ## ####  ##    ##    ##       ####  ## ##     ## -- 
-            -- ######   ########  ##     ## ## ## ##    ##    ######   ## ## ## ##     ## -- 
-            -- ##       ##   ##   ##     ## ##  ####    ##    ##       ##  #### ##     ## -- 
-            -- ##       ##    ##  ##     ## ##   ###    ##    ##       ##   ### ##     ## -- 
-            -- ##       ##     ##  #######  ##    ##    ##    ######## ##    ## ########  -- 
-            --------------------------------------------------------------------------------
-
-            case currCommand is
-                -- Active Block (latch Bank and Row Address)
-                when ActiveEna =>
-                    bankPtr := to_integer(unsigned(bankIn));
-                    if memBank(bankPtr).precharged then
-                        memBank(bankPtr).active     := true;
-                        memBank(bankPtr).precharged := false;
-                        memBank(bankPtr).rowAddr    := unsigned(addrIn);
-                        memBank(bankPtr).rcdCheck   := NOW;
-                        memBank(bankPtr).rasCheck   := NOW;
-                        -- Precharge to Active Bank 0
-                        assert (NOW - memBank(bankPtr).rpCheck >= tRP)
-                        report "tRP violation during Activate Bank " & natural'image(bankPtr)
-                        severity warning;
-                    else
-                        report "Bank " & natural'image(bankPtr) & " is not Precharged, cannot be Activated"
-                        severity warning;
-                    end if;
-
-                    -- Active Bank A to Active Bank B
-                    if ((Previous_bank /= unsigned(bankIn)) and (NOW - RRD_chk < tRRD)) then
-                        report "tRRD violation during Activate"
-                        severity warning;
-                    end if;
-                    -- LMR to ACT
-                    assert (MRD_chk >= tMRD)
-                    report "tMRD violation during Activate"
-                    severity warning;
-                    -- AutoRefresh to Activate
-                    assert (NOW - RC_chk >= tRC)
-                    report "tRC violation during Activate"
-                    severity warning;
-                    -- Record variable for checking violation
-                    RRD_chk       := NOW;
-                    Previous_bank := unsigned(bankIn);
-
-                -- Auto Refresh
-                when ArefEna =>
-                    -- Auto Refresh to Auto Refresh
-                    assert (NOW - RC_chk >= tRC)
-                    report "tRC violation during Auto Refresh"
-                    severity warning;
-                    -- Precharge to Auto Refresh
-                    assert (NOW - memBank(0).rpCheck >= tRP or NOW - memBank(1).rpCheck >= tRP or NOW - memBank(2).rpCheck >= tRP or NOW - memBank(3).rpCheck >= tRP)
-                    report "tRP violation during Auto Refresh"
-                    severity warning;
-                    -- All banks must be idle before refresh
-                    -- FIXME: is this right?
-                    --                assert Pc_b3 = '0' OR Pc_b2 = '0' OR Pc_b1 = '0' OR Pc_b0 = '0'
-                    assert memBank(0).precharged and memBank(1).precharged and memBank(2).precharged and memBank(3).precharged
-                    report "All banks must be Precharge before Auto Refresh"
-                    severity warning;
-                    -- Record current tRC time
-                    RC_chk := NOW;
-
-                -- Burst Terminate
-                when BurstTerm =>
-                    -- Terminate a Write immediately
-                    if dataInEnable then
-                        dataInEnable := false;
-                    end if;
-                    -- Terminate a Read depending on CAS Latency
-                    if latencyMode = '3' then
-                        cmdPipeline(2) := BST;
-                    elsif latencyMode = '2' then
-                        cmdPipeline(1) := BST;
-                    end if;
-
-                -- Load Mode Register
-                when ModeRegEna =>
-                    modeReg <= std_logic_vector(addrIn);
-                    assert memBank(0).precharged and memBank(1).precharged and memBank(2).precharged and memBank(3).precharged
-                    report "All bank must be Precharge before Load Mode Register"
-                    severity warning;
-                    -- REF to LMR
-                    assert (NOW - RC_chk >= tRC)
-                    report "tRC violation during Load Mode Register"
-                    severity warning;
-                    -- LMR to LMR
-                    assert (MRD_chk >= tMRD)
-                    report "tMRD violation during Load Mode Register"
-                    severity warning;
-                    -- Record current tMRD time
-                    MRD_chk := 0;
-
-                -- Precharge Block
-                when PrechargeEna =>
-                    if prechargeFlag then -- precharge all banks
-                        for i in 0 to BANK_COUNT loop
-                            memBank(i).precharged := true;
-                            memBank(i).active     := false;
-                            memBank(i).rpCheck    := NOW;
-                        end loop;
-                        -- Activate to Precharge all banks
-                        --                        assert ((NOW - RAS_chk0 >= tRAS) or (NOW - RAS_chk1 >= tRAS))
-                        assert NOW - memBank(0).rasCheck >= tRAS and NOW - memBank(1).rasCheck >= tRAS and NOW - memBank(2).rasCheck >= tRAS and NOW - memBank(3).rasCheck >= tRAS
-                        report "tRAS violation during Precharge all banks"
-                        severity warning;
-                        -- tWR violation check for Write
-                        if ((NOW - memBank(0).wrCheckpoint < tWRp) or (NOW - memBank(1).wrCheckpoint < tWRp) or (NOW - memBank(2).wrCheckpoint < tWRp) OR (NOW - memBank(3).wrCheckpoint < tWRp)) then
-                            report "tWR violation during Precharge ALL banks"
-                            severity warning;
-                        end if;
-                    else                -- precharge only selected bank
-                        bankPtr                     := to_integer(unsigned(bankIn));
-                        memBank(bankPtr).precharged := true;
-                        memBank(bankPtr).active     := false;
-                        memBank(bankPtr).rpCheck    := NOW;
-                        -- Activate to Precharge bank
-                        assert (NOW - memBank(bankPtr).rasCheck >= tRAS)
-                        report "tRAS violation during Precharge bank " & natural'image(bankPtr)
-                        severity warning;
-                        -- tWR violation check for Write
-                        assert (NOW - memBank(bankPtr).wrCheckpoint >= tWRp)
-                        report "tWR violation during Precharge"
-                        severity warning;
-                    end if;
-
-                    -- Terminate a Write Immediately (if same bank or all banks)
-                    if (dataInEnable and (Bank = unsigned(bankIn) or prechargeFlag)) then
-                        dataInEnable := false;
-                    end if;
-
-                    -- Precharge Command Pipeline for READ
-                    if latencyMode = '3' then
-                        cmdPipeline(2)           := PRECH;
-                        bankPrechargePipeline(2) := unsigned(bankIn);
-                        A10_precharge(2)         := TO_BIT(addrIn(10));
-                    elsif latencyMode = '2' then
-                        cmdPipeline(1)           := PRECH;
-                        bankPrechargePipeline(1) := unsigned(bankIn);
-                        A10_precharge(1)         := TO_BIT(addrIn(10));
-                    end if;
-
-                -- Read, Write, Column Latch
-                when ReadEna | WriteEna =>
-                    bankPtr := to_integer(unsigned(bankIn));
-                    -- Check to see if bank is open (ACT) for Read or Write
-                    assert not memBank(bankPtr).precharged
-                    report "Cannot Read or Write - Bank is not Activated"
-                    severity warning;
-
-                    -- Activate to Read or Write
-                    assert NOW - memBank(bankPtr).rcdCheck >= tRCD
-                    report "tRCD violation during Read or Write to Bank " & natural'image(bankPtr)
-                    severity warning;
-
-                    -- Read Command
-                    if currCommand = ReadEna then
-                        -- CAS Latency Pipeline
-                        if latencyMode = '3' then
-                            -- TODO: find out what this flag controls during READ
-                            if prechargeFlag then
-                                cmdPipeline(2) := READ_A;
-                            else
-                                cmdPipeline(2) := READ;
-                            end if;
-                            colAddrPipeline(2)  := unsigned(addrIn(COL_BITS - 1 DOWNTO 0));
-                            bankAddrPipeline(2) := unsigned(bankIn);
-                        elsif latencyMode = '2' then
-                            if prechargeFlag then
-                                cmdPipeline(1) := READ_A;
-                            else
-                                cmdPipeline(1) := READ;
-                            end if;
-                            colAddrPipeline(1)  := unsigned(addrIn(COL_BITS - 1 DOWNTO 0));
-                            bankAddrPipeline(1) := unsigned(bankIn);
-                        end if;
-
-                        -- Read intterupt a Write (terminate Write immediately)
-                        if dataInEnable then
-                            dataInEnable := false;
-                        end if;
-
-                    -- Write Command
-                    elsif currCommand = WriteEna then
-                        if prechargeFlag then
-                            cmdPipeline(0) := WRITE_A;
-                        else
-                            cmdPipeline(0) := WRITE;
-                        end if;
-                        colAddrPipeline(0)  := unsigned(addrIn(COL_BITS - 1 downto 0));
-                        bankAddrPipeline(0) := unsigned(bankIn);
-
-                        -- Write intterupts a Write (terminate Write immediately)
-                        if dataInEnable then
-                            dataInEnable := false;
-                        end if;
-
-                        -- Write interrupts a Read (terminate Read immediately)
-                        if dataOutEnable then
-                            dataOutEnable := false;
-                        end if;
-                    end if;
-
-                    -- Interrupt a Write with Auto Precharge
-                    if memBank(to_integer(RW_interrupt_bank)).autoPrecharge and memBank(to_integer(RW_interrupt_bank)).writePrecharge then
-                        RW_interrupt_write(TO_INTEGER(RW_Interrupt_Bank)) := '1';
-                    end if;
-
-                    -- Interrupt a Read with Auto Precharge
-                    if memBank(to_integer(RW_interrupt_bank)).autoPrecharge and memBank(to_integer(RW_interrupt_bank)).readPrecharge then
-                        RW_interrupt_read(TO_INTEGER(RW_Interrupt_Bank)) := '1';
-                    end if;
-
-                    -- Read or Write with Auto Precharge
-                    if prechargeFlag then
-                        bankPtr                         := to_integer(unsigned(bankIn));
-                        memBank(bankPtr).autoPrecharge  := true;
-                        memBank(bankPtr).countPrecharge := 0;
-                        RW_Interrupt_Bank               := unsigned(bankIn);
-                        if currCommand = ReadEna then
-                            memBank(bankPtr).readPrecharge := true;
-                        elsif currCommand = WriteEna then
-                            memBank(bankPtr).writePrecharge := true;
-                        end if;
-                    end if;
-
-                when NoOp =>
-                    null;
-            end case;
+        wait on clkInternal, clkRas;
+        if rising_edge(clkInternal) and Load = '0' and Dump = '0' then
 
             -----------------------------------------------------------------------
             -- ########     ###     ######  ##    ## ######## ##    ## ########  --
@@ -701,81 +855,6 @@ begin
                 decodeBurst;
             end if;
 
-        elsif rising_edge(Sys_clk) and Load = '1' and Dump = '0' then
-            --            currOp <= LOAD_FILE;
-            load := '0';
-            report "Reading memory array from file. This operation may take several minutes. Please wait..."
-            severity note;
-            while not endfile(file_load) loop
-                readline(file_load, l);
-                read(l, ch);
-                if (ch /= 'S') or (ch /= 's') then
-                    hread(l, rectype);
-                    hread(l, reclen);
-                    recaddr := (others => '0');
-                    case rectype is
-                        when "0001" =>
-                            hread(l, recaddr(15 downto 0));
-                        when "0010" =>
-                            hread(l, recaddr(23 downto 0));
-                        when "0011" =>
-                            hread(l, recaddr);
-                            recaddr(31 downto 24) := (others => '0');
-                        when others => next;
-                    end case;
-                    if L.all'length * 4 < recdata'length then
-                        hread(l, recdata(0 to L.all'length * 4 - 1));
-                    else
-                        hread(l, recdata);
-                    end if;
-
-                    if index < 32 then
-                        Bank_Load := unsigned(recaddr(25 downto 24));
-                        Rows_Load := unsigned(recaddr(23 downto 11));
-                        Cols_Load := unsigned(recaddr(10 downto 2));
-                        initMem(Bank_Load, TO_INTEGER(Rows_Load));
-                        for i in 0 to 3 loop
-                            memBank(to_integer(Bank_Load)).storage(to_integer(Rows_Load))(to_integer(Cols_Load) + i) := (inUse => true, data => recdata(i * 32 + index to i * 32 + index + 15));
-                        end loop;
-                    else
-                        Bank_Load := unsigned(recaddr(26 downto 25));
-                        Rows_Load := unsigned(recaddr(24 downto 12));
-                        Cols_Load := unsigned(recaddr(11 downto 3));
-                        initMem(Bank_Load, TO_INTEGER(Rows_Load));
-                        for i in 0 to 3 loop
-                            memBank(to_integer(Bank_Load)).storage(to_integer(Rows_Load))(to_integer(Cols_Load) + i) := (inUse => true, data => recdata(i * 64 + index - 32 to i * 64 + index - 32 + 15));
-                        end loop;
-                    end if;
-                end if;
-            end loop;
-        elsif rising_edge(Sys_clk) AND Load = '0' AND Dump = '1' then --'
-            --            currOp <= DUMP_FILE;
-            report "Writing memory array to file.  This operation may take several minutes.  Please wait..."
-            severity note;
-            WRITE(l, string'("# Micron Technology, Inc. (FILE DUMP / MEMORY DUMP)"));
-            WRITELINE(file_dump, l);
-            WRITE(l, string'("# BA ROWS          COLS      DQ"));
-            WRITELINE(file_dump, l);
-            WRITE(l, string'("# -- ------------- --------- ----------------"));
-            WRITELINE(file_dump, l);
-
-            -- dump all banks
-            for k in 0 to BANK_COUNT loop
-                for i in 0 to 2**ADDR_BITS - 1 loop
-                    -- Check if ROW is NULL
-                    if memBank(k).storage(i) /= NULL then
-                        for j in 0 to 2**COL_BITS - 1 loop
-                            -- Check if COL is NULL
-                            next when memBank(k).storage(i)(j).inUse = false;
-                            write(l, to_string(to_unsigned(k, 2)), right, 4);
-                            write(l, To_BitVector(Conv_Std_Logic_Vector(i, ADDR_BITS)), right, ADDR_BITS + 1);
-                            write(l, To_BitVector(Conv_std_Logic_Vector(j, COL_BITS)), right, COL_BITS + 1);
-                            write(l, memBankArray(k)(i)(j).data, right, DATA_WIDTH + 1);
-                            writeline(file_dump, l);
-                        end loop;
-                    end if;
-                end loop;
-            end loop;
         end if;
 
         -- Write with AutoPrecharge Calculation

@@ -7,7 +7,7 @@ package sdram_pkg is
     constant BANK_COUNT : natural := 4;
 
     type State_T is (ACT, A_REF, BST, LMR, NOP, PRECH, READ, READ_A, WRITE, WRITE_A, LOAD_FILE, DUMP_FILE);
-    type Command_T is (ActiveEna, ArefEna, BurstTerm, ModeRegEna, PrechargeEna, ReadEna, WriteEna, NoOp);
+    type Command_T is (ActiveEna, ArefEna, BurstTerm, ModeRegEna, PrechargeEna, ReadEna, WriteEna, NoOp, CmdInhibit);
     type Burst_Length_T is ('1', '2', '4', '8', FullPage, InvalidLength);
     type Latency_Mode_T is ('2', '3', InvalidLatency);
     type Array4xBool is array (BANK_COUNT - 1 downto 0) of boolean;
