@@ -14,7 +14,9 @@ package sdram_pkg_new is
     type Write_Burst_Mode_T is (SingleLocation, ProgrammedLength);
 
     pure function logic_to_bool(val : std_logic) return boolean;
-    pure function next_bank_state(currState : Bank_State_T) return Bank_State_T;
+    pure function bank_next_state(currState : Bank_State_T) return Bank_State_T;
+    pure function bank_state_auto_transition(currState : Bank_State_T) return boolean;
+    pure function bank_transition_valid(currState : Bank_State_T; nextState : Bank_State_T) return boolean;
 end package sdram_pkg_new;
 
 package body sdram_pkg_new is
@@ -27,7 +29,7 @@ package body sdram_pkg_new is
     end function logic_to_bool;
 
     -- generate next bank state according to current state
-    pure function next_bank_state(currState : Bank_State_T) return Bank_State_T is
+    pure function bank_next_state(currState : Bank_State_T) return Bank_State_T is
     begin
         case currState is
             when Activating =>
@@ -48,5 +50,31 @@ package body sdram_pkg_new is
                 return currState;
 
         end case;
-    end function next_bank_state;
+    end function bank_next_state;
+
+    pure function bank_state_auto_transition(currState : Bank_State_T) return boolean is
+    begin
+        return currState = ActiveRecharging;
+    end function bank_state_auto_transition;
+
+    pure function bank_transition_valid(currState : Bank_State_T; nextState : Bank_State_T) return boolean is
+    begin
+        if currState = Idle and nextState = Refreshing then
+            return true;
+        elsif currState = Refreshing and nextState = Idle then
+            return true;
+        elsif currState = Idle and nextState = Activating then
+            return true;
+        elsif currState = Activating and nextState = ActiveRecharging then
+            return true;
+        elsif currState = ActiveRecharging and nextState = ActiveIdle then
+            return true;
+        elsif currState = ActiveIdle and nextState = Precharging then
+            return true;
+        elsif currState = Precharging and nextState = Idle then
+            return true;
+        else
+            return false;
+        end if;
+    end function bank_transition_valid;
 end package body sdram_pkg_new;
