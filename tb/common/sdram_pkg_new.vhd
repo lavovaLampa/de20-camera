@@ -15,7 +15,6 @@ package sdram_pkg_new is
 
     pure function logic_to_bool(val : std_logic) return boolean;
     pure function bank_next_state(currState : Bank_State_T) return Bank_State_T;
-    pure function bank_state_auto_transition(currState : Bank_State_T) return boolean;
     pure function bank_transition_valid(currState : Bank_State_T; nextState : Bank_State_T) return boolean;
 end package sdram_pkg_new;
 
@@ -45,17 +44,12 @@ package body sdram_pkg_new is
                 return Idle;
 
             when Idle | ActiveIdle =>
-                report "Non-transitive state"
+                report "Cannot generate next state, specify manually"
                 severity error;
                 return currState;
 
         end case;
     end function bank_next_state;
-
-    pure function bank_state_auto_transition(currState : Bank_State_T) return boolean is
-    begin
-        return currState = ActiveRecharging;
-    end function bank_state_auto_transition;
 
     pure function bank_transition_valid(currState : Bank_State_T; nextState : Bank_State_T) return boolean is
     begin
