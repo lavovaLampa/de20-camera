@@ -2,50 +2,54 @@ library ieee;
 use ieee.std_logic_1164.all;
 use ieee.numeric_std.all;
 use ieee.math_real.all;
+use std.textio.all;
 use work.sdram_pkg_new.all;
 
+-- SDRAM must support CONCURRENT AUTO PRECHARGE
 entity sdram_model_new is
     generic(
         -- timings
         -- FIXME: fix this
-        tCAS           : time    := 0 ns;
-        tAC            : time    := 6.0 ns; -- access time from clk
-        tHZ            : time    := 7.0 ns; -- output high impedance time
-        tOH            : time    := 2.7 ns; -- output data hold time
-        tMRD           : natural := 2;  -- clock cycles between write to mode register and next command
-        tRAS           : time    := 44.0 ns; -- row address strobe (active to precharge)
-        tRC            : time    := 66.0 ns; -- row cycle (ref to ref / activate to activate)
-        tRCD           : time    := 20.0 ns; -- RAS to CAS delay (active command to read/write command delay time)
-        tRP            : time    := 20.0 ns; -- row precharge time (min. time between precharging row and activating new one)
-        tRRD           : time    := 15.0 ns; -- bank to bank delay time (min. time between successive ACTIVE commands to different banks)
-        tWRa           : time    := 7.5 ns; -- A2 Version - Auto precharge mode only (1 Clk + 7.5 ns)
-        tWRp           : time    := 15.0 ns; -- A2 Version - Precharge mode only (15 ns)
+        tCAS             : time    := 0 ns;
+        tAC              : time    := 6.0 ns; -- access time from clk
+        tHZ              : time    := 7.0 ns; -- output high impedance time
+        tOH              : time    := 2.7 ns; -- output data hold time
+        tMRD             : natural := 2; -- clock cycles between write to mode register and next command
+        tRAS             : time    := 44.0 ns; -- row address strobe (active to precharge)
+        tRC              : time    := 66.0 ns; -- row cycle (ref to ref / activate to activate)
+        tRCD             : time    := 20.0 ns; -- RAS to CAS delay (active command to read/write command delay time)
+        tRP              : time    := 20.0 ns; -- row precharge time (min. time between precharging row and activating new one)
+        tRRD             : time    := 15.0 ns; -- bank to bank delay time (min. time between successive ACTIVE commands to different banks)
+        tWRa             : time    := 7.5 ns; -- A2 Version - Auto precharge mode only (1 Clk + 7.5 ns)
+        tWRp             : time    := 15.0 ns; -- A2 Version - Precharge mode only (15 ns)
         -- FIXME: implement 
-        tCKA           : time    := 0 ns; -- CKE to CLK recovery delay time
+        tCKA             : time    := 0 ns; -- CKE to CLK recovery delay time
 
-        tAH            : time    := 0.8 ns; -- address hold time
-        tAS            : time    := 1.5 ns; -- address setup time
-        tCH            : time    := 2.5 ns; -- clk high level width
-        tCL            : time    := 2.5 ns; -- clk low level width
-        tCK            : time    := 10.0 ns; -- clk cycle time
-        tDH            : time    := 0.8 ns; -- input data hold time
-        tDS            : time    := 1.5 ns; -- input data setup time
-        tCKH           : time    := 0.8 ns; -- CKE hold time (clk enable?)
-        tCKS           : time    := 1.5 ns; -- CKE setup time
-        tCMH           : time    := 0.8 ns; -- command hold time
-        tCMS           : time    := 1.5 ns; -- command setup time
+        tAH              : time    := 0.8 ns; -- address hold time
+        tAS              : time    := 1.5 ns; -- address setup time
+        tCH              : time    := 2.5 ns; -- clk high level width
+        tCL              : time    := 2.5 ns; -- clk low level width
+        tCK              : time    := 10.0 ns; -- clk cycle time
+        tDH              : time    := 0.8 ns; -- input data hold time
+        tDS              : time    := 1.5 ns; -- input data setup time
+        tCKH             : time    := 0.8 ns; -- CKE hold time (clk enable?)
+        tCKS             : time    := 1.5 ns; -- CKE setup time
+        tCMH             : time    := 0.8 ns; -- command hold time
+        tCMS             : time    := 1.5 ns; -- command setup time
 
-        tREF           : time    := 64 ms; -- refresh cycle time (4096)
+        tREF             : time    := 64 ms; -- refresh cycle time (4096)
 
         -- period of clkIn
-        CLK_PERIOD     : time    := 8 ns;
+        CLK_PERIOD       : time    := 8 ns;
         -- ram parameters
-        ADDR_WIDTH     : natural := 12;
-        COL_WIDTH      : natural := 8;
-        DATA_WIDTH     : natural := 16;
+        ADDR_WIDTH       : natural := 12;
+        COL_WIDTH        : natural := 8;
+        DATA_WIDTH       : natural := 16;
         -- simulation settings
-        LOAD_FROM_FILE : boolean := false;
-        DUMP_TO_FILE   : boolean := false
+        LOAD_FROM_FILE   : boolean := false;
+        DUMP_TO_FILE     : boolean := false;
+        INPUT_FILE_NAME  : string  := "input_fjel.txt";
+        OUTPUT_FILE_NAME : string  := "output_fjel.txt"
     );
     port(
         clkIn                                : in    std_logic;
@@ -204,11 +208,12 @@ begin
             constant REFRESH_TO_IDLE                  : natural := IDLE_TO_ACTIVE_RECHARGING + ACTIVE_RECHARGING_TO_ACTIVE_IDLE + PRE_TO_IDLE;
 
             -- TODO: change upper counter limit
-            type Bank_Counter_R is record
-                active  : boolean;
-                counter : natural range 0 to 10;
-            end record Bank_Counter_R;
-            type Bank_Counters_T is array (0 to BANK_COUNT - 1) of Bank_Counter_R;
+            type Bank_State_Helper_R is record
+                counting           : boolean;
+                counter            : natural range 0 to 10;
+                scheduledPrecharge : boolean;
+            end record Bank_State_Helper_R;
+            type Bank_Helpers_T is array (0 to BANK_COUNT - 1) of Bank_State_Helper_R;
 
             pure function get_delay(currState : Bank_State_T; nextState : Bank_State_T) return natural is
                 type State_Delay_Map_T is array (Bank_State_T, Bank_State_T) of natural;
@@ -249,30 +254,30 @@ begin
             end function get_delay;
 
             -- store timings
-            variable bankCounters  : Bank_Counters_T := (others => (active => false, counter => 0));
+            variable bankCounters  : Bank_Helpers_T := (others => (counting => false, counter => 0, scheduledPrecharge => false));
             variable activeCounter : natural range 0 to 10; -- TODO: generic upper limit
 
             -- helper variables
-            variable currBank : Bank_T  := 0;
-            variable currAddr : Row_T   := 0;
-            variable a10Flag  : boolean := false;
+            variable bankPtr : Bank_T  := 0;
+            variable addrPtr : Row_T   := 0;
+            variable a10Flag : boolean := false;
         begin
             if rising_edge(clkInternal) then
                 -- helper variables
-                currBank := to_integer(inputReg.bank);
-                currAddr := to_integer(inputReg.addr);
-                a10Flag  := logic_to_bool(inputReg.addr(10));
+                bankPtr := to_integer(inputReg.bank);
+                addrPtr := to_integer(inputReg.addr);
+                a10Flag := logic_to_bool(inputReg.addr(10));
 
                 -- decrement counters and traverse states
                 for i in 0 to BANK_COUNT - 1 loop
-                    if bankCounters(i).active then
+                    if bankCounters(i).counting then
                         if bankCounters(i).counter = 0 then
                             banks(i).state <= bank_next_state(banks(i).state);
 
                             if banks(i).state = ActiveIdle then
                                 bankCounters(i).counter := get_delay(ActiveIdle, bank_next_state(banks(i).state));
                             else
-                                bankCounters(i).active := false;
+                                bankCounters(i).counting := false;
                             end if;
                         else
                             bankCounters(i).counter := bankCounters(i).counter - 1;
@@ -296,8 +301,8 @@ begin
                         severity error;
 
                         -- Bank to be activated must be Idle
-                        assert banks(currBank).state = Idle
-                        report "Bank " & natural'image(currBank) & " is not in Idle state"
+                        assert banks(bankPtr).state = Idle
+                        report "Bank " & natural'image(bankPtr) & " is not in Idle state"
                         severity error;
 
                         -- There is a delay between Active commands
@@ -305,47 +310,62 @@ begin
                         report "Cannot issue another Active command right after last one (not enough time passed)"
                         severity error;
 
-                        banks(currBank).state          <= Activating;
-                        banks(currBank).row            <= currAddr;
-                        bankCounters(currBank).counter := get_delay(Activating, bank_next_state(Activating));
-                        activeCounter                  := ACTIVE_TO_ACTIVE;
+                        banks(bankPtr).state          <= Activating;
+                        banks(bankPtr).row            <= addrPtr;
+                        bankCounters(bankPtr).counter := get_delay(Activating, bank_next_state(Activating));
+                        activeCounter                 := ACTIVE_TO_ACTIVE;
 
                     -- close activated row (if idle does nothing)
+                    -- a10 flags selects whether to Precharge all banks (a10 HIGH -> Precharge All)
                     -- precharge(bank_addr, a10)
                     when Precharge =>
                         assert ctrl.state /= AccessingModeReg
-                        report "Controller is not in valid state to Activate row"
+                        report "Cannot issue any command other than NoOp or Command Inhibit during Load Mode Register operation"
                         severity error;
 
-                        if a10Flag then -- precharge all banks
+                        if a10Flag then -- precharge all banks (all must be in a valid state to Precharge)
                             for i in 0 to BANK_COUNT - 1 loop
                                 assert banks(i).state = ActiveIdle or banks(i).state = Idle
-                                report "All banks are not in Idle or Active state"
+                                report "All banks are not in Idle or Active state with capacitors recharged"
                                 severity error;
 
+                                -- cannot terminate Read/Write Burst with Auto Precharge using a Precharge command
                                 assert (not ctrl.autoPrecharge) or (ctrl.state /= WriteBurst and ctrl.state /= ReadBurst)
                                 report "Cannot Precharge all banks while doing a Burst with Auto Precharge enabled"
                                 severity error;
 
-                                -- if banks is idle Precharge acts as NOP
+                                -- cannot Precharge a bank that has a Precharge command already pending
+                                -- as a result of a short Write/Read burst
+                                assert not bankCounters(i).scheduledPrecharge
+                                report "Bank " & natural'image(i) & " has a Precharge scheduled after a Write/Read burst with Auto Precharge"
+                                severity error;
+
+                                -- if banks is idle, Precharge acts as NOP
                                 if (banks(i).state = ActiveIdle) then
                                     banks(i).state          <= Precharging;
                                     bankCounters(i).counter := get_delay(Precharging, bank_next_state(Precharging));
                                 end if;
                             end loop;
                         else            -- precharge only selected bank
-                            assert banks(currBank).state = ActiveIdle or banks(currBank).state = Idle
-                            report "Bank " & natural'image(currBank) & " is not in Idle or Active state"
+                            assert banks(bankPtr).state = ActiveIdle or banks(bankPtr).state = Idle
+                            report "Bank " & natural'image(bankPtr) & " is not in Idle or Active state with capacitors recharged"
                             severity error;
 
-                            assert (not ctrl.autoPrecharge) or (ctrl.state /= WriteBurst and ctrl.state /= ReadBurst) or ctrl.currBank /= currBank
-                            report "Cannot Precharge bank " & natural'image(currBank) & " while doing a Burst with Auto Precharge enabled"
+                            -- cannot terminate Read/Write Burst with Auto Precharge using a Precharge command
+                            assert (not ctrl.autoPrecharge) or (ctrl.state /= WriteBurst and ctrl.state /= ReadBurst) or ctrl.currBank /= bankPtr
+                            report "Cannot Precharge bank " & natural'image(bankPtr) & " while doing a Burst with Auto Precharge enabled"
                             severity error;
 
-                            -- if banks is idle Precharge acts as NOP
-                            if (banks(currBank).state = ActiveIdle) then
-                                banks(currBank).state          <= Precharging;
-                                bankCounters(currBank).counter := get_delay(Precharging, bank_next_state(Precharging));
+                            -- cannot Precharge a bank that has a Precharge command already pending
+                            -- as a result of a short Write/Read burst
+                            assert not bankCounters(bankPtr).scheduledPrecharge
+                            report "Bank " & natural'image(bankPtr) & " has a Precharge scheduled after a Write/Read burst with Auto Precharge"
+                            severity error;
+
+                            -- if bank is Idle, Precharge acts as NOP
+                            if (banks(bankPtr).state = ActiveIdle) then
+                                banks(bankPtr).state          <= Precharging;
+                                bankCounters(bankPtr).counter := get_delay(Precharging, bank_next_state(Precharging));
                             end if;
                         end if;
 
@@ -374,21 +394,23 @@ begin
                             report "Bank " & natural'image(ctrl.currBank) & "is not currently in Active state, cannot start Auto Precharge"
                             severity error;
 
-                            assert currBank /= ctrl.currBank
+                            assert bankPtr /= ctrl.currBank
                             report "Cannot truncate a Burst with Auto Precharge enabled"
                             severity error;
 
-                            banks(ctrl.currBank).state          <= Precharging;
-                            bankCounters(ctrl.currBank).counter := get_delay(Precharging, bank_next_state(Precharging));
+                            if banks(ctrl.currBank).state = ActiveIdle then
+                                banks(ctrl.currBank).state          <= Precharging;
+                                bankCounters(ctrl.currBank).counter := get_delay(Precharging, bank_next_state(Precharging));
+                            elsif banks(ctrl.currBank).state = ActiveRecharging then
+                                bankCounters(ctrl.currBank).scheduledPrecharge := true;
+                            else
+                                report "Inconsistent banks state detected... (probably a code error)"
+                                severity error;
+                            end if;
                         end if;
 
-                    when BurstTerminate =>
-                        assert not ctrl.autoPrecharge
-                        report "Cannot truncate a Burst with Auto Precharge enabled"
-                        severity error;
-
-                    -- ingnore NoOp, CmdInhibit, LoadModeReg, CmdError
-                    when NoOp | CmdInhibit | LoadModeReg | CmdError =>
+                    -- ingnore NoOp, CmdInhibit, LoadModeReg, CmdError, BurstTerminate
+                    when NoOp | CmdInhibit | LoadModeReg | CmdError | BurstTerminate =>
                         null;
                 end case;
 
@@ -405,6 +427,7 @@ begin
             -- memory data storage
             variable bankData : Mem_Bank_Array_T;
 
+            -- helper memory procedures
             procedure init_mem(bank : in Bank_Range_T; row : in Row_Range_T) is
             begin
                 if bankData(bank)(row) = NULL then
@@ -470,7 +493,12 @@ begin
             end function validate_mode_reg;
 
             -- tmp
-            variable loadDone : boolean := false;
+            variable loadDone                                 : boolean := false;
+            file inputFile, outputFile                        : text;
+            variable inputLine, outputLine                    : line;
+            variable bankCount, rowCount, colCount, dataWidth : natural;
+            variable rowUsed                                  : boolean;
+            variable tmpCol                                   : bit_vector(DATA_WIDTH - 1 downto 0);
 
             -- state variables
             variable currCol      : Col_T                               := 0;
@@ -497,228 +525,231 @@ begin
             variable isPrechargingAll, isRefreshing : boolean    := false;
         begin
             if LOAD_FROM_FILE and not loadDone then
-                report "Reading memory array from file. This operation may take several minutes. Please wait..." severity note;
-                while not endfile(file_load) loop
-                    readline(file_load, l);
-                    read(l, ch);
-                    if (ch /= 'S') or (ch /= 's') then
-                        hread(l, rectype);
-                        hread(l, reclen);
-                        recaddr := (others => '0');
+                -- run only once
+                loadDone := true;
 
-                        case rectype is
-                            when "0001" =>
-                                hread(l, recaddr(15 downto 0));
-                            when "0010" =>
-                                hread(l, recaddr(23 downto 0));
-                            when "0011" =>
-                                hread(l, recaddr);
-                                recaddr(31 downto 24) := (others => '0');
-                            when others => next;
-                        end case;
+                report "Reading (sparse) memory from file, please wait..." severity note;
+                file_open(inputFile, INPUT_FILE_NAME, read_mode);
 
-                        if L.all'length * 4 < recdata'length then
-                            hread(l, recdata(0 to L.all'length * 4 - 1));
-                        else
-                            hread(l, recdata);
-                        end if;
+                while not endfile(inputFile) loop
+                    readline(inputFile, inputLine);
 
-                        if index < 32 then
-                            currBank := to_integer(unsigned(recaddr(25 downto 24)));
-                            currRow  := to_integer(unsigned(recaddr(23 downto 11)));
-                            currCol  := to_integer(unsigned(recaddr(10 downto 2)));
-                            initMem(currBank, currRow);
-                            for i in 0 to 3 loop
-                                bankData(currBank + i)(currRow)(currCol) := (inUse => true, data => recdata(i * 32 + index to i * 32 + index + 15));
-                            end loop;
-                        else
-                            currBank := to_integer(unsigned(recaddr(26 downto 25)));
-                            currRow  := to_integer(unsigned(recaddr(24 downto 12)));
-                            currCol  := to_integer(unsigned(recaddr(11 downto 3)));
-                            initMem(currBank, currRow);
-                            for i in 0 to 3 loop
-                                bankData(currBank)(currRow)(currCol + i) := (inUse => true, data => recdata(i * 64 + index - 32 to i * 64 + index - 32 + 15));
-                            end loop;
-                        end if;
-                    end if;
+                    read(inputLine, bankCount);
+                    assert bankCount = BANK_COUNT;
+                    read(inputLine, rowCount);
+                    assert rowCount = 2**ADDR_WIDTH;
+                    read(inputLine, colCount);
+                    assert colCount = 2**COL_WIDTH;
+                    read(inputLine, dataWidth);
+                    assert dataWidth = DATA_WIDTH;
+
+                    for bank in 0 to BANK_COUNT - 1 loop
+                        for row in Row_T loop
+                            readline(inputFile, inputLine);
+                            read(inputLine, rowUsed);
+
+                            if rowUsed then
+                                init_mem(bank, row);
+                                for col in Col_T loop
+                                    read(inputLine, tmpCol);
+                                    bankData(bank)(row)(col) := tmpCol;
+                                end loop;
+                            end if;
+                        end loop;
+                    end loop;
                 end loop;
+                file_close(inputFile);
             end if;
 
+            while not simEnded loop
+                wait until rising_edge(clkInternal);
+                if rising_edge(clkInternal) then
+                    -- helper variables
+                    bankPtr := to_integer(inputReg.bank);
+                    addrPtr := to_integer(inputReg.addr);
+                    a10Flag := logic_to_bool(inputReg.addr(10));
+                    data    := inputReg.data;
+
+                    -- set additional state flags
+                    isPrechargingAll := true;
+                    isRefreshing     := true;
+                    for i in 0 to BANK_COUNT - 1 loop
+                        isPrechargingAll := isPrechargingAll and banks(i).state = Precharging;
+                        isRefreshing     := isRefreshing and banks(i).state = Refreshing;
+                    end loop;
+
+                    -- schedule waiting operations
+                    if ctrl.state = AccessingModeReg then
+                        ctrl.state <= Idle;
+                    end if;
+
+                    -- read/write operations
+                    if ctrl.state = ReadBurst or ctrl.state = WriteBurst then
+                        if ctrl.state = ReadBurst then
+                            -- FIXME: CL latency
+                            -- FIXME: add hold and setup time requirements
+                            dataOutPipeline(latencyMode - 2) <= read_mem(ctrl.currBank, banks(ctrl.currBank).row, get_curr_col, inputReg.dqm);
+                        else
+                            write_mem(ctrl.currBank, banks(ctrl.currBank).row, get_curr_col, inputReg.data, inputReg.dqm);
+                        end if;
+                    end if;
+
+                    -- increment burst counter
+                    if ctrl.state = WriteBurst or ctrl.state = ReadBurst then
+                        -- if write burst is disabled, only write to one location
+                        if ctrl.state = WriteBurst and writeBurstMode = SingleLocation then
+                            ctrl.state <= Idle;
+                        elsif burstCounter = burstLength then
+                            -- FullPage burst mode wraps around (only ends after user cmd)
+                            if burstLength = PAGE_LEN then
+                                burstCounter := 0;
+                            else
+                                ctrl.state <= Idle;
+                            end if;
+                        else
+                            if burstType = Sequential then
+                                burstCounter := burstCounter + 1;
+                            else
+                                -- FIXME: implement interleaved burst
+                                null;
+                            end if;
+                        end if;
+                    end if;
+
+                    case inputReg.cmd is
+                        when CmdInhibit | NoOp =>
+                            null;
+
+                        -- Start a Read burst beginning from selected column
+                        -- a10Flag = Auto Precharge
+                        -- read(col_addr, bank_addr, a10Flag)
+                        when Read =>
+                            assert ctrl.state /= AccessingModeReg
+                            report "Cannot Read during Load Mode Register operation"
+                            severity warning;
+
+                            assert banks(bankPtr).state = ActiveRecharging or banks(bankPtr).state = ActiveIdle
+                            report "Selected bank not Active, cannot start Read burst"
+                            severity error;
+
+                            -- cannot start a new read burst in the same bank if Auto Precharge is enabled
+                            assert (not ctrl.autoPrecharge) or ctrl.currBank /= bankPtr
+                            report "Cannot initiate new Read burst to bank doing Burst with Auto Precharge"
+                            severity error;
+
+                            ctrl.state         <= ReadBurst;
+                            ctrl.currBank      <= bankPtr;
+                            ctrl.autoPrecharge <= a10Flag;
+
+                            currCol      := addrPtr;
+                            burstCounter := 0;
+
+                        when Write =>
+                            assert ctrl.state /= AccessingModeReg
+                            report "Cannot Read during Load Mode Register operation"
+                            severity error;
+
+                            assert banks(bankPtr).state = ActiveRecharging or banks(bankPtr).state = ActiveIdle
+                            report "Selected bank not Active, cannot start Write burst"
+                            severity error;
+
+                            -- cannot start a new write burst in the same bank if Auto Precharge is enabled
+                            assert (not ctrl.autoPrecharge) or ctrl.currBank /= bankPtr
+                            report "Cannot initiate new Read burst to bank doing Burst with Auto Precharge"
+                            severity error;
+
+                            ctrl.state         <= WriteBurst;
+                            ctrl.currBank      <= bankPtr;
+                            ctrl.autoPrecharge <= a10Flag;
+
+                            currCol      := addrPtr;
+                            burstCounter := 0;
+
+                        when BurstTerminate =>
+                            assert ctrl.state = WriteBurst or ctrl.state = ReadBurst
+                            report "Controller currently not doing a Write/Read burst"
+                            severity warning;
+
+                            assert not ctrl.autoPrecharge
+                            report "Cannot truncate a burst with Auto Precharge enabled"
+                            severity error;
+
+                            ctrl.state <= Idle;
+
+                            currCol      := 0;
+                            burstCounter := 0;
+
+                        when Precharge =>
+                            assert (ctrl.state /= WriteBurst and ctrl.state /= Readburst) or (not ctrl.autoPrecharge) or (not a10Flag and ctrl.currBank /= bankPtr)
+                            report "Cannot truncate a Read/Write burst with Auto Precharge enabled using Precharge command"
+                            severity error;
+
+                            -- if Precharge all or Precharge current bank
+                            if (ctrl.state = WriteBurst or ctrl.state = ReadBurst) and not ctrl.autoPrecharge then
+                                if a10Flag or bankPtr = ctrl.currBank then
+                                    -- truncate Read/Write burst without Auto Precharge
+                                    ctrl.state <= Idle;
+                                end if;
+                            end if;
+
+                        when LoadModeReg =>
+                            assert ctrl.state = Idle
+                            report "Controller not in Idle state, cannot Load Mode Register"
+                            severity error;
+
+                            for i in 0 to BANK_COUNT - 1 loop
+                                assert banks(i).state = Idle
+                                report "Bank " & natural'image(i) & " not in Idle state, cannot Load Mode Register"
+                                severity error;
+                            end loop;
+
+                            assert validate_mode_reg(data)
+                            report "Invalid Mode Register value on data input, cannot Load Mode Register"
+                            severity error;
+
+                            ctrl.state <= AccessingModeReg;
+                            modeReg    <= data;
+
+                        -- Active does not terminate read/write burst
+                        -- Refresh handled by bank controller
+                        when Refresh | Active =>
+                            null;
+
+                        when CmdError =>
+                            report "Cannot decode command"
+                            severity error;
+
+                    end case;
+                end if;
+            end loop;
+
             if DUMP_TO_FILE and simEnded then
+                report "Dumping (sparse) memory to file, please wait..." severity note;
+                file_open(outputFile, OUTPUT_FILE_NAME, write_mode);
+
+                write(outputLine, BANK_COUNT);
+                write(outputLine, 2**ADDR_WIDTH);
+                write(outputLine, 2**COL_WIDTH);
+                write(outputLine, DATA_WIDTH);
+                writeline(outputFile, outputLine);
+
                 for bank in Bank_Range_T loop
                     for row in Row_Range_T loop
                         if bankData(bank)(row) = NULL then
-
+                            write(outputLine, false);
                         else
+                            write(outputLine, true);
                             for col in Col_Range_T loop
-
+                                write(outputLine, bankData(bank)(row)(col));
                             end loop;
                         end if;
+                        writeline(outputFile, outputLine);
                     end loop;
                 end loop;
+                file_close(outputFile);
             end if;
 
-            wait until rising_edge(clkInternal);
-            if rising_edge(clkInternal) then
-                -- helper variables
-                bankPtr := to_integer(inputReg.bank);
-                addrPtr := to_integer(inputReg.addr);
-                a10Flag := logic_to_bool(inputReg.addr(10));
-                data    := inputReg.data;
-
-                -- set additional state flags
-                isPrechargingAll := true;
-                isRefreshing     := true;
-                for i in 0 to BANK_COUNT - 1 loop
-                    isPrechargingAll := isPrechargingAll and banks(i).state = Precharging;
-                    isRefreshing     := isRefreshing and banks(i).state = Refreshing;
-                end loop;
-
-                -- schedule waiting operations
-                if ctrl.state = AccessingModeReg then
-                    ctrl.state <= Idle;
-                end if;
-
-                -- read/write operations
-                if ctrl.state = ReadBurst or ctrl.state = WriteBurst then
-                    if ctrl.state = ReadBurst then
-                        -- FIXME: CL latency
-                        -- FIXME: add hold and setup time requirements
-                        dataOutPipeline(latencyMode - 2) <= read_mem(ctrl.currBank, banks(ctrl.currBank).row, get_curr_col, inputReg.dqm);
-                    else
-                        write_mem(ctrl.currBank, banks(ctrl.currBank).row, get_curr_col, inputReg.data, inputReg.dqm);
-                    end if;
-                end if;
-
-                -- increment burst counter
-                if ctrl.state = WriteBurst or ctrl.state = ReadBurst then
-                    -- if write burst is disabled, only write to one location
-                    if ctrl.state = WriteBurst and writeBurstMode = SingleLocation then
-                        ctrl.state <= Idle;
-                    elsif burstCounter = burstLength then
-                        -- FullPage burst mode wraps around (only ends after user cmd)
-                        if burstLength = PAGE_LEN then
-                            burstCounter := 0;
-                        else
-                            ctrl.state <= Idle;
-                        end if;
-                    else
-                        if burstType = Sequential then
-                            burstCounter := burstCounter + 1;
-                        else
-                            -- FIXME: implement interleaved burst
-                            null;
-                        end if;
-                    end if;
-                end if;
-
-                case inputReg.cmd is
-                    when CmdInhibit | NoOp =>
-                        null;
-
-                    -- Start a Read burst beginning from selected column
-                    -- a10Flag = Auto Precharge
-                    -- read(col_addr, bank_addr, a10Flag)
-                    when Read =>
-                        assert ctrl.state /= AccessingModeReg
-                        report "Cannot Read during Load Mode Register operation"
-                        severity warning;
-
-                        assert banks(bankPtr).state = ActiveRecharging or banks(bankPtr).state = ActiveIdle
-                        report "Selected bank not Active, cannot start Read burst"
-                        severity error;
-
-                        -- cannot start a new read burst in the same bank if Auto Precharge is enabled
-                        assert (not ctrl.autoPrecharge) or ctrl.currBank /= bankPtr
-                        report "Cannot initiate new Read burst to bank doing Burst with Auto Precharge"
-                        severity error;
-
-                        ctrl.state         <= ReadBurst;
-                        ctrl.currBank      <= bankPtr;
-                        ctrl.autoPrecharge <= a10Flag;
-
-                        currCol      := addrPtr;
-                        burstCounter := 0;
-
-                    when Write =>
-                        assert ctrl.state /= AccessingModeReg
-                        report "Cannot Read during Load Mode Register operation"
-                        severity error;
-
-                        assert banks(bankPtr).state = ActiveRecharging or banks(bankPtr).state = ActiveIdle
-                        report "Selected bank not Active, cannot start Write burst"
-                        severity error;
-
-                        -- cannot start a new write burst in the same bank if Auto Precharge is enabled
-                        assert (not ctrl.autoPrecharge) or ctrl.currBank /= bankPtr
-                        report "Cannot initiate new Read burst to bank doing Burst with Auto Precharge"
-                        severity error;
-
-                        ctrl.state         <= WriteBurst;
-                        ctrl.currBank      <= bankPtr;
-                        ctrl.autoPrecharge <= a10Flag;
-
-                        currCol      := addrPtr;
-                        burstCounter := 0;
-
-                    when BurstTerminate =>
-                        assert ctrl.state = WriteBurst or ctrl.state = ReadBurst
-                        report "Controller currently not doing a burst write/read"
-                        severity warning;
-
-                        assert not ctrl.autoPrecharge
-                        report "Cannot terminate Burst with Auto Precharge enabled"
-                        severity error;
-
-                        ctrl.state <= Idle;
-
-                        currCol      := 0;
-                        burstCounter := 0;
-
-                    when Precharge =>
-                        assert (not ctrl.autoPrecharge) or ctrl.currBank /= bankPtr
-                        report "Cannot truncate burst with Auto Precharge enabled using Precharge"
-                        severity error;
-
-                        -- if Precharge all or Precharge current bank
-                        if ctrl.state = WriteBurst or ctrl.state = ReadBurst then
-                            if a10Flag or bankPtr = ctrl.currBank then
-                                -- end write/read burst
-                                ctrl.state   <= Idle;
-                                burstCounter := 0;
-                            end if;
-                        end if;
-
-                    when LoadModeReg =>
-                        assert ctrl.state = Idle
-                        report "Controller not in Idle state, cannot Load Mode Register"
-                        severity error;
-
-                        for i in 0 to BANK_COUNT - 1 loop
-                            assert banks(i).state = Idle
-                            report "Bank " & natural'image(i) & " not in Idle state, cannot Load Mode Register"
-                            severity error;
-                        end loop;
-
-                        assert validate_mode_reg(data)
-                        report "Invalid Mode Register value on data input, cannot Load Mode Register"
-                        severity error;
-
-                        ctrl.state <= AccessingModeReg;
-                        modeReg    <= data;
-
-                    -- Active does not terminate read/write burst
-                    -- Refresh handled by bank controller
-                    when Refresh | Active =>
-                        null;
-
-                    when CmdError =>
-                        report "Cannot decode command"
-                        severity error;
-
-                end case;
-
-            end if;
+            wait;
         end process mainCtrl;
     end block ctrlBlock;
 end architecture model;
