@@ -8,28 +8,47 @@ use work.sdram_pkg_new.all;
 -- SDRAM must support CONCURRENT AUTO PRECHARGE
 entity sdram_model_new is
     generic(
-        -- timings
-        -- FIXME: fix this
-        tCAS             : time    := 0 ns;
-        tAC              : time    := 6.0 ns; -- access time from clk
+        -- input clk period
+        CLK_PERIOD       : time    := 7.5 ns;
+        -- command timings
+        tRC              : time    := 55 ns; -- row cycle (ref to ref / activate to activate) [shortest row access strobe (Idle -> Access -> Idle)]
+        tRAS             : time    := 40 ns; -- row address strobe (activate to precharge) [shortest row access time (capacitors take time to recover)]
+        tRP              : time    := 15 ns; -- row precharge time (min. time between precharging row and activating new one)
+        tRCD             : time    := 15 ns; -- RAS to CAS delay (active command to read/write command delay time) [min. time between activating a row and issuing Read/Write command]
+        tRRD             : time    := 10 ns; -- bank to bank delay time (min. time between successive Active commands to different banks)
+        tDPL             : time    := 2 * CLK_PERIOD; -- input data to Precharge command delay (also defined as tWR)
+        tDAL             : time    := (2 * CLK_PERIOD) + tRP; -- input data to Active/Refresh command delay (during Auto Precharge)
+        tXSR             : time    := 60 ns; -- exit to Self Refresh to Active
+        tREF             : time    := 64 ms; -- Refresh cycle time (all rows) [4096 for current SDRAM]
+
+        -- command-related timings defined in clock cycles
+        -- tDAL : natural := 4;
+        -- tDPL : natural := 2;
+        tCCD             : natural := 1; -- Read/Write command to Read/Write command
+        tCKED            : natural := 1; -- CKE to clock disable or power-down entry mode
+        tPED             : natural := 1; -- CKE to clock enable or power-down exit setup mode
+        tDQD             : natural := 0; -- DQM to input data delay
+        tDQM             : natural := 0; -- DQM to data mask during Writes
+        tDQZ             : natural := 2; -- DQM to data high-impedance during Reads
+        tDWD             : natural := 0; -- Write command to input data delay
+        tBDL             : natural := 1; -- Last data-in to Burst Terminate command
+        tCDL             : natural := 1; -- Last data-in to new Read/Write command
+        tRDL             : natural := 2; -- Last data-in to Precharge command
+        tMRD             : natural := 2; -- Load Mode Register command to Active or Refresh command
+        tROH             : natural := 2; -- Data-out ot high-impedance from Precharge command
+
+        -- low-level timings
+        tAC              : time    := 6.0 ns; -- max. access time from clk
         tHZ              : time    := 7.0 ns; -- output high impedance time
         tOH              : time    := 2.7 ns; -- output data hold time
-        tMRD             : natural := 2; -- clock cycles between write to mode register and next command
-        tRAS             : time    := 44.0 ns; -- row address strobe (active to precharge)
-        tRC              : time    := 66.0 ns; -- row cycle (ref to ref / activate to activate)
-        tRCD             : time    := 20.0 ns; -- RAS to CAS delay (active command to read/write command delay time)
-        tRP              : time    := 20.0 ns; -- row precharge time (min. time between precharging row and activating new one)
-        tRRD             : time    := 15.0 ns; -- bank to bank delay time (min. time between successive ACTIVE commands to different banks)
         tWRa             : time    := 7.5 ns; -- A2 Version - Auto precharge mode only (1 Clk + 7.5 ns)
         tWRp             : time    := 15.0 ns; -- A2 Version - Precharge mode only (15 ns)
-        -- FIXME: implement 
         tCKA             : time    := 0 ns; -- CKE to CLK recovery delay time
-
         tAH              : time    := 0.8 ns; -- address hold time
         tAS              : time    := 1.5 ns; -- address setup time
         tCH              : time    := 2.5 ns; -- clk high level width
         tCL              : time    := 2.5 ns; -- clk low level width
-        tCK              : time    := 10.0 ns; -- clk cycle time
+        tCK              : time    := 7.5 ns; -- clk cycle time
         tDH              : time    := 0.8 ns; -- input data hold time
         tDS              : time    := 1.5 ns; -- input data setup time
         tCKH             : time    := 0.8 ns; -- CKE hold time (clk enable?)
@@ -37,19 +56,16 @@ entity sdram_model_new is
         tCMH             : time    := 0.8 ns; -- command hold time
         tCMS             : time    := 1.5 ns; -- command setup time
 
-        tREF             : time    := 64 ms; -- refresh cycle time (4096)
-
-        -- period of clkIn
-        CLK_PERIOD       : time    := 8 ns;
         -- ram parameters
-        ADDR_WIDTH       : natural := 12;
-        COL_WIDTH        : natural := 8;
-        DATA_WIDTH       : natural := 16;
+        ADDR_WIDTH       : natural := 12; -- addr bus width for mem. row selection
+        COL_WIDTH        : natural := 8; -- addr bus width for mem. column selection
+        DATA_WIDTH       : natural := 16; -- mem i/o data path width
+
         -- simulation settings
-        LOAD_FROM_FILE   : boolean := false;
-        DUMP_TO_FILE     : boolean := false;
-        INPUT_FILE_NAME  : string  := "input_fjel.txt";
-        OUTPUT_FILE_NAME : string  := "output_fjel.txt"
+        LOAD_FROM_FILE   : boolean := false; -- whether to load memory content from file
+        DUMP_TO_FILE     : boolean := false; -- whether to store memory content to a file
+        INPUT_FILE_NAME  : string  := "input_fjel.txt"; -- name of a file to be loaded
+        OUTPUT_FILE_NAME : string  := "output_fjel.txt" -- name of a file to be dumped
     );
     port(
         clkIn                                : in    std_logic;
@@ -204,7 +220,7 @@ begin
             constant PRE_TO_IDLE                      : natural := 2;
             constant IDLE_TO_ACTIVE_RECHARGING        : natural := 2;
             constant ACTIVE_RECHARGING_TO_ACTIVE_IDLE : natural := 3;
-            constant ACTIVE_TO_ACTIVE                 : natural := 2;
+            constant ACTIVE_TO_ACTIVE                 : natural := 2; -- derived from tRRD
             constant REFRESH_TO_IDLE                  : natural := IDLE_TO_ACTIVE_RECHARGING + ACTIVE_RECHARGING_TO_ACTIVE_IDLE + PRE_TO_IDLE;
 
             -- TODO: change upper counter limit
@@ -268,14 +284,20 @@ begin
                 addrPtr := to_integer(inputReg.addr);
                 a10Flag := logic_to_bool(inputReg.addr(10));
 
-                -- decrement counters and traverse states
+                -- resolve scheduled tasks
                 for i in 0 to BANK_COUNT - 1 loop
+                    if bankCounters(i).scheduledPrecharge and banks(i).state = ActiveIdle then
+                        banks(i).state          <= Precharging;
+                        bankCounters(i).counter := get_delay(Precharging, bank_next_state(Precharging));
+                    end if;
+
                     if bankCounters(i).counting then
                         if bankCounters(i).counter = 0 then
                             banks(i).state <= bank_next_state(banks(i).state);
 
-                            if banks(i).state = ActiveIdle then
-                                bankCounters(i).counter := get_delay(ActiveIdle, bank_next_state(banks(i).state));
+                            -- if bank is Active schedule transition from ActiveIdle to ActiveRecharging
+                            if banks(i).state = Activating then
+                                bankCounters(i).counter := get_delay(ActiveRecharging, ActiveIdle);
                             else
                                 bankCounters(i).counting := false;
                             end if;
@@ -404,7 +426,7 @@ begin
                             elsif banks(ctrl.currBank).state = ActiveRecharging then
                                 bankCounters(ctrl.currBank).scheduledPrecharge := true;
                             else
-                                report "Inconsistent banks state detected... (probably a code error)"
+                                report "Inconsistent banks state detected... (probably a source error)"
                                 severity error;
                             end if;
                         end if;
@@ -413,7 +435,6 @@ begin
                     when NoOp | CmdInhibit | LoadModeReg | CmdError | BurstTerminate =>
                         null;
                 end case;
-
             end if;
         end process bankCtrl;
 
@@ -511,7 +532,7 @@ begin
                 tmp := currCol + burstCounter;
                 -- wrap the burst around column end
                 while tmp > COL_END loop
-                    tmp := tmp - COL_END;
+                    tmp := tmp mod COL_END;
                 end loop;
                 assert tmp >= 0;
                 return tmp;
@@ -578,12 +599,9 @@ begin
                         isRefreshing     := isRefreshing and banks(i).state = Refreshing;
                     end loop;
 
-                    -- schedule waiting operations
-                    if ctrl.state = AccessingModeReg then
-                        ctrl.state <= Idle;
-                    end if;
-
-                    -- read/write operations
+                    -- TODO: implement single location Write option + Auto Precharge + tRDL
+                    -- TODO: might be best to re-architecture
+                    -- resolve scheduled Read(s)/Write(s)
                     if ctrl.state = ReadBurst or ctrl.state = WriteBurst then
                         if ctrl.state = ReadBurst then
                             -- FIXME: CL latency
@@ -592,6 +610,11 @@ begin
                         else
                             write_mem(ctrl.currBank, banks(ctrl.currBank).row, get_curr_col, inputReg.data, inputReg.dqm);
                         end if;
+                    end if;
+
+                    -- 
+                    if ctrl.state = AccessingModeReg then
+                        ctrl.state <= Idle;
                     end if;
 
                     -- increment burst counter
