@@ -1,0 +1,3 @@
+[submodule "lib/PoC"]
+	path = lib/PoC
+	url = git@github.com:lavovaLampa/PoC.git

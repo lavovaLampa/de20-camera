@@ -192,7 +192,7 @@ begin
                         pixelOut(Blue) <= pipelineAcc(Pixel_Range);
 
                     when Green2 =>
-                        pixelOut(Green) <= color3Out;
+                    	pixelOut(Green) <= color3Out;
 
                         pipelineAcc    := color1Out(0) / 2;
                         pixelOut(Blue) <= pipelineAcc(Pixel_Range);
