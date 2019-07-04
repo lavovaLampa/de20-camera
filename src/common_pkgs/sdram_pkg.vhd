@@ -7,12 +7,14 @@ package sdram_pkg is
     -- input clk period
     constant CLK_PERIOD : time := 7.5 ns;
 
+    -- sdram port widths
     constant COL_ADDR_WIDTH  : natural := 12;
     constant ROW_ADDR_WIDTH  : natural := 8;
     constant BANK_ADDR_WIDTH : natural := 2;
     constant DATA_WIDTH      : natural := 16;
     constant DQM_WIDTH       : natural := DATA_WIDTH / 8;
 
+    -- useful computed constants
     constant BANK_COUNT : natural := 2**BANK_ADDR_WIDTH;
     constant PAGE_LEN   : natural := 2**ROW_ADDR_WIDTH;
 
@@ -45,18 +47,21 @@ package sdram_pkg is
     end record Cmd_Aggregate_R;
 
     -- command timings
-    constant tRC  : time := 55 ns;      -- row cycle (ref to ref / activate to activate) [shortest row access strobe (Idle -> Access -> Idle)]
-    constant tRAS : time := 40 ns;      -- row address strobe (activate to precharge) [shortest row access time (capacitors take time to recover)]
-    constant tRP  : time := 15 ns;      -- row precharge time (min. time between precharging row and activating new one)
-    constant tRCD : time := 15 ns;      -- RAS to CAS delay (active command to read/write command delay time) [min. time between activating a row and issuing Read/Write command]
-    constant tRRD : time := 10 ns;      -- bank to bank delay time (min. time between successive Active commands to different banks)
-    constant tDPL : time := 2 * CLK_PERIOD; -- input data to Precharge command delay (also defined as tWR)
-    constant tDAL : time := (2 * CLK_PERIOD) + tRP; -- input data to Active/Refresh command delay (during Auto Precharge)
-    constant tXSR : time := 60 ns;      -- exit to Self Refresh to Active
-    constant tREF : time := 64 ms;      -- Refresh cycle time (all rows) [4096 for current SDRAM]
+    -- TODO: do i need this timing?
+    constant tARFC   : time := 60 ns;
+    constant tRC     : time := 60 ns;   -- row cycle (ref to ref / activate to activate) [shortest row access strobe (Idle -> Access -> Idle)]
+    constant tRASmin : time := 42 ns;   -- row address strobe (activate to precharge) [shortest row access time (capacitors take time to recover)]
+    constant tRASmax : time := 100 us;  -- row active hold time [longest time row can be held active]
+    constant tRP     : time := 18 ns;   -- row precharge time (min. time between precharging row and activating new one)
+    constant tRCD    : time := 18 ns;   -- RAS to CAS delay (active command to read/write command delay time) [min. time between activating a row and issuing Read/Write command]
+    constant tRRD    : time := 12 ns;   -- bank to bank delay time (min. time between successive Active commands to different banks)
+    constant tDPL    : time := 2 * CLK_PERIOD; -- input data to Precharge command delay (also defined as tWR)
+    constant tDAL    : time := (2 * CLK_PERIOD) + tRP; -- input data to Active/Refresh command delay (during Auto Precharge)
+    constant tXSR    : time := 60 ns;   -- exit to Self Refresh to Active
+    constant tREF    : time := 64 ms;   -- Refresh cycle time (all rows) [4096 for current SDRAM]
 
     -- command-related timings defined in clock cycles
-    -- tDAL : natural := 4;
+    -- tDAL : natural := 5;
     -- tDPL : natural := 2;
     constant tCCD  : natural := 1;      -- Read/Write command to Read/Write command
     constant tCKED : natural := 1;      -- CKE to clock disable or power-down entry mode
