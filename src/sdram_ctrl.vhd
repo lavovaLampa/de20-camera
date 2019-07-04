@@ -1,6 +1,7 @@
 library ieee;
 use ieee.std_logic_1164.all;
 use ieee.numeric_std.all;
+use work.ram_ctrl_pkg.all;
 use work.sdram_pkg.all;
 
 -- writes/reads only FullPage bursts (256 x 16b)
@@ -24,6 +25,11 @@ architecture RTL of sdram_ctrl is
 begin
     mainProc : process(clkIn)
     begin
+        if rstAsyncIn = '1' then
+
+        elsif rising_edge(clkIn) then
+
+        end if;
     end process mainProc;
 
     bankCtrl : process(clkIn)

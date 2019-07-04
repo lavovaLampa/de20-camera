@@ -1,15 +1,48 @@
-package sdram_pkg is
-    type Ctrl_Cmd_T is (NoOp, Read, Write, Refresh);
+library ieee;
+use ieee.std_logic_1164.all;
+use ieee.numeric_std.all;
+use ieee.math_real.all;
 
+package sdram_pkg is
     -- input clk period
     constant CLK_PERIOD : time := 7.5 ns;
 
     constant COL_ADDR_WIDTH  : natural := 12;
     constant ROW_ADDR_WIDTH  : natural := 8;
     constant BANK_ADDR_WIDTH : natural := 2;
+    constant DATA_WIDTH      : natural := 16;
+    constant DQM_WIDTH       : natural := DATA_WIDTH / 8;
 
-    constant ADDR_WIDTH : natural := COL_ADDR_WIDTH + ROW_ADDR_WIDTH;
-    constant DATA_WIDTH : natural := 16;
+    constant BANK_COUNT : natural := 2**BANK_ADDR_WIDTH;
+    constant PAGE_LEN   : natural := 2**ROW_ADDR_WIDTH;
+
+    subtype Addr_T is unsigned(ROW_ADDR_WIDTH - 1 downto 0);
+    subtype Data_T is std_logic_vector(DATA_WIDTH - 1 downto 0);
+
+    -- SDRAM commands
+    type Cmd_T is (CmdInhibit, NoOp, Active, Read, Write, BurstTerminate, Precharge, Refresh, LoadModeReg);
+    -- Mode register burst types
+    type Burst_Type_T is (Interleaved, Sequential);
+    -- Mode register burst length
+    subtype Burst_Length_T is natural range 0 to 2**ROW_ADDR_WIDTH;
+    -- Mode register latency mode
+    subtype Latency_Mode_T is natural range 2 to 3;
+    -- Mode register write burst mode
+    type Write_Burst_Mode_T is (SingleLocation, ProgrammedLength);
+
+    type Mode_Reg_R is record
+        burstType      : Burst_Type_T;
+        burstLength    : Burst_Length_T;
+        latencyMode    : Latency_Mode_T;
+        writeBurstMode : Write_Burst_Mode_T;
+    end record Mode_Reg_R;
+
+    type Cmd_Aggregate_R is record
+        chipSelectNeg    : std_logic;
+        rowAddrStrobeNeg : std_logic;
+        colAddrStrobeNeg : std_logic;
+        writeEnableNeg   : std_logic;
+    end record Cmd_Aggregate_R;
 
     -- command timings
     constant tRC  : time := 55 ns;      -- row cycle (ref to ref / activate to activate) [shortest row access strobe (Idle -> Access -> Idle)]
@@ -56,4 +89,197 @@ package sdram_pkg is
     constant tCKS : time := 1.5 ns;     -- CKE setup time
     constant tCMH : time := 0.8 ns;     -- command hold time
     constant tCMS : time := 1.5 ns;     -- command setup time
+
+    pure function decode_cmd(chipSelectNeg, rowAddrStrobeNeg, colAddrStrobeNeg, writeEnableNeg : std_logic) return Cmd_T;
+    pure function encode_cmd(cmd : Cmd_T) return Cmd_Aggregate_R;
+    pure function encode_mode_reg(burstLength : Burst_Length_T; burstType : Burst_Type_T; latencyMode : Latency_Mode_T; writeBurstMode : Write_Burst_Mode_T) return Data_T;
+    pure function decode_mode_reg(modeReg : Data_T) return Mode_Reg_R;
+
 end package sdram_pkg;
+
+package body sdram_pkg is
+    subtype Cmd_Aggregate is std_logic_vector(3 downto 0);
+    subtype Burst_Length_Logic_T is std_logic_vector(2 downto 0);
+    subtype Latency_Mode_Logic_T is std_logic_vector(2 downto 0);
+
+    pure function decode_cmd(chipSelectNeg, rowAddrStrobeNeg, colAddrStrobeNeg, writeEnableNeg : std_logic) return Cmd_T is
+        variable cmdSelectAggregate : std_logic_vector(3 downto 0) := chipSelectNeg & rowAddrStrobeNeg & colAddrStrobeNeg & writeEnableNeg;
+    begin
+        case cmdSelectAggregate is
+            when "1---" => return CmdInhibit;
+            when "0111" => return NoOp;
+            when "0011" => return Active;
+            when "0101" => return Read;
+            when "0100" => return Write;
+            when "0110" => return BurstTerminate;
+            when "0010" => return Precharge;
+            when "0001" => return Refresh;
+            when "0000" => return LoadModeReg;
+            when others =>
+                report "Invalid cmd" severity warning;
+                return NoOp;
+        end case;
+    end function decode_cmd;
+
+    pure function encode_cmd_internal(cmd : Cmd_T) return Cmd_Aggregate is
+    begin
+        case cmd is
+            when CmdInhibit     => return "1---";
+            when NoOp           => return "0111";
+            when Active         => return "0011";
+            when Read           => return "0101";
+            when Write          => return "0100";
+            when BurstTerminate => return "0110";
+            when Precharge      => return "0010";
+            when Refresh        => return "0001";
+            when LoadModeReg    => return "0000";
+        end case;
+    end function encode_cmd_internal;
+
+    pure function encode_cmd(cmd : Cmd_T) return Cmd_Aggregate_R is
+        variable cmdAggregate : Cmd_Aggregate := encode_cmd_internal(cmd);
+    begin
+        return (
+            chipSelectNeg    => cmdAggregate(3),
+            rowAddrStrobeNeg => cmdAggregate(2),
+            colAddrStrobeNeg => cmdAggregate(1),
+            writeEnableNeg   => cmdAggregate(0)
+        );
+    end function encode_cmd;
+
+    pure function validate_mode_reg(modeReg : Data_T) return boolean is
+        variable burstLength    : std_logic_vector(2 downto 0) := modeReg(2 downto 0);
+        variable burstType      : std_logic                    := modeReg(3);
+        variable latencyMode    : std_logic_vector(2 downto 0) := modeReg(6 downto 4);
+        variable operatingMode  : std_logic_vector(1 downto 0) := modeReg(8 downto 7);
+        variable writeBurstMode : std_logic                    := modeReg(9);
+        variable reserved       : std_logic_vector(1 downto 0) := modeReg(11 downto 10);
+        variable isValid        : boolean                      := true;
+    begin
+        isValid := isValid and (burstLength = "000" or burstLength = "001" or burstLength = "010" or burstLength = "011" or burstLength = "111");
+        isValid := isValid and (burstType = '1' or burstType = '0');
+        isValid := isValid and not (burstLength = "111" and burstType = '1');
+        isValid := isValid and (latencyMode = "010" or latencyMode = "011");
+        isValid := isValid and operatingMode = "00";
+        isValid := isValid and (writeBurstMode = '1' or writeBurstMode = '0');
+        isValid := isValid and reserved = (reserved'range => '0');
+        return isValid;
+    end function validate_mode_reg;
+
+    pure function encode_burst_length(burstLength : Burst_Length_T) return Burst_Length_Logic_T is
+    begin
+        case burstLength is
+            when 1        => return "000";
+            when 2        => return "001";
+            when 4        => return "010";
+            when 8        => return "011";
+            when PAGE_LEN => return "111";
+            when others =>
+                report "Invalid burst length, cannot encode"
+                severity error;
+        end case;
+    end function encode_burst_length;
+
+    pure function decode_burst_length(data : std_logic_vector(2 downto 0)) return Burst_Length_T is
+    begin
+        case data is
+            when "000" => return 1;
+            when "001" => return 2;
+            when "010" => return 4;
+            when "011" => return 8;
+            when "111" => return PAGE_LEN;
+            when others =>
+                report "Invalid burst length, cannot decode"
+                severity error;
+        end case;
+    end function decode_burst_length;
+
+    pure function encode_burst_type(burstType : Burst_Type_T) return std_logic is
+    begin
+        case burstType is
+            when Interleaved => return '1';
+            when Sequential  => return '0';
+        end case;
+    end function encode_burst_type;
+
+    pure function decode_burst_type(data : std_logic) return Burst_Type_T is
+    begin
+        case data is
+            when '1' => return Interleaved;
+            when '0' => return Sequential;
+            when others =>
+                report "Cannot decode burst type, invalid value"
+                severity error;
+        end case;
+    end function decode_burst_type;
+
+    pure function encode_latency_mode(latencyMode : Latency_Mode_T) return Latency_Mode_Logic_T is
+    begin
+        case latencyMode is
+            when 2 => return "010";
+            when 3 => return "011";
+            when others =>
+                report "Invalid latency mode"
+                severity error;
+        end case;
+    end function encode_latency_mode;
+
+    pure function decode_latency_mode(data : std_logic_vector(2 downto 0)) return Latency_Mode_T is
+    begin
+        case data is
+            when "010" => return 2;
+            when "011" => return 3;
+            when others =>
+                report "Cannot decode latency mode, invalid value"
+                severity error;
+        end case;
+    end function decode_latency_mode;
+
+    pure function encode_write_burst_mode(writeBurstMode : Write_Burst_Mode_T) return std_logic is
+    begin
+        case writeBurstMode is
+            when SingleLocation   => return '1';
+            when ProgrammedLength => return '0';
+        end case;
+    end function encode_write_burst_mode;
+
+    pure function decode_write_burst_mode(data : std_logic) return Write_Burst_Mode_T is
+    begin
+        case data is
+            when '1' => return SingleLocation;
+            when '0' => return ProgrammedLength;
+            when others =>
+                report "Cannot decode write burst mode, invalid value"
+                severity error;
+        end case;
+    end function decode_write_burst_mode;
+
+    pure function encode_mode_reg(burstLength : Burst_Length_T; burstType : Burst_Type_T; latencyMode : Latency_Mode_T; writeBurstMode : Write_Burst_Mode_T) return Data_T is
+        variable modeReg : Data_T := (others => '0');
+    begin
+        modeReg(2 downto 0) := encode_burst_length(burstLength);
+        modeReg(3)          := encode_burst_type(burstType);
+        modeReg(6 downto 4) := encode_latency_mode(latencyMode);
+        modeReg(9)          := encode_write_burst_mode(writeBurstMode);
+
+        assert validate_mode_reg(modeReg)
+        report "Invalid mode register setting"
+        severity error;
+
+        return modeReg;
+    end function encode_mode_reg;
+
+    pure function decode_mode_reg(modeReg : Data_T) return Mode_Reg_R is
+    begin
+        assert validate_mode_reg(modeReg)
+        report "Invalid mode register setting"
+        severity error;
+
+        return (
+            burstType      => decode_burst_type(modeReg(3)),
+            burstLength    => decode_burst_length(modeReg(2 downto 0)),
+            latencyMode    => decode_latency_mode(modeReg(6 downto 4)),
+            writeBurstMode => decode_write_burst_mode(modeReg(9))
+        );
+    end function decode_mode_reg;
+end package body sdram_pkg;
