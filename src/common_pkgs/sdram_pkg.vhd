@@ -8,18 +8,28 @@ package sdram_pkg is
     constant CLK_PERIOD : time := 7.5 ns;
 
     -- sdram port widths
-    constant COL_ADDR_WIDTH  : natural := 12;
-    constant ROW_ADDR_WIDTH  : natural := 8;
     constant BANK_ADDR_WIDTH : natural := 2;
+    constant ROW_ADDR_WIDTH  : natural := 12;
+    constant COL_ADDR_WIDTH  : natural := 8;
     constant DATA_WIDTH      : natural := 16;
     constant DQM_WIDTH       : natural := DATA_WIDTH / 8;
 
     -- useful computed constants
     constant BANK_COUNT : natural := 2**BANK_ADDR_WIDTH;
-    constant PAGE_LEN   : natural := 2**ROW_ADDR_WIDTH;
+    constant PAGE_LEN   : natural := 2**COL_ADDR_WIDTH;
 
+    -- i/o types
     subtype Addr_T is unsigned(ROW_ADDR_WIDTH - 1 downto 0);
     subtype Data_T is std_logic_vector(DATA_WIDTH - 1 downto 0);
+
+    -- internal types/data ranges
+    subtype Row_T is natural range 0 to 2**ROW_ADDR_WIDTH - 1;
+    subtype Col_T is natural range 0 to 2**COL_ADDR_WIDTH - 1;
+    subtype Bank_T is natural range 0 to BANK_COUNT - 1;
+
+    -- SDRAM/banks state definitions
+    type Bank_State_T is (Idle, Activating, ActiveRecharging, ActiveIdle, Precharging, Refreshing);
+    type Ctrl_State_T is (Idle, ReadBurst, WriteBurst, AccessingModeReg);
 
     -- SDRAM commands
     type Cmd_T is (CmdInhibit, NoOp, Active, Read, Write, BurstTerminate, Precharge, Refresh, LoadModeReg);
