@@ -20,16 +20,18 @@ package sdram_pkg is
 
     -- i/o types
     subtype Addr_T is unsigned(ROW_ADDR_WIDTH - 1 downto 0);
+    subtype Col_Addr_T is unsigned(COL_ADDR_WIDTH - 1 downto 0);
+    subtype Bank_Addr_T is unsigned(BANK_ADDR_WIDTH - 1 downto 0);
     subtype Data_T is std_logic_vector(DATA_WIDTH - 1 downto 0);
 
     -- internal types/data ranges
-    subtype Row_T is natural range 0 to 2**ROW_ADDR_WIDTH - 1;
-    subtype Col_T is natural range 0 to 2**COL_ADDR_WIDTH - 1;
-    subtype Bank_T is natural range 0 to BANK_COUNT - 1;
+    subtype Row_Ptr_T is natural range 0 to 2**ROW_ADDR_WIDTH - 1;
+    subtype Col_Ptr_T is natural range 0 to 2**COL_ADDR_WIDTH - 1;
+    subtype Bank_Ptr_T is natural range 0 to BANK_COUNT - 1;
 
     -- SDRAM/banks state definitions
     type Bank_State_T is (Idle, Activating, ActiveRecharging, ActiveIdle, Precharging, Refreshing);
-    type Ctrl_State_T is (Idle, ReadBurst, WriteBurst, AccessingModeReg);
+    type Sdram_State_T is (Idle, ReadBurst, WriteBurst, AccessingModeReg);
 
     -- SDRAM commands
     type Cmd_T is (CmdInhibit, NoOp, Active, Read, Write, BurstTerminate, Precharge, Refresh, LoadModeReg);
@@ -56,6 +58,13 @@ package sdram_pkg is
         writeEnableNeg   : std_logic;
     end record Cmd_Aggregate_R;
 
+    type Mem_IO_Aggregate_R is record
+        cmd  : Cmd_T;
+        addr : Addr_T;
+        bank : Bank_Addr_T;
+        data : Data_T;
+    end record Mem_IO_Aggregate_R;
+
     -- command timings
     -- TODO: do i need this timing?
     constant tARFC   : time := 60 ns;
@@ -73,6 +82,7 @@ package sdram_pkg is
     -- command-related timings defined in clock cycles
     -- tDAL : natural := 5;
     -- tDPL : natural := 2;
+    constant tCAS  : natural := 2;      -- Read command to valid data out/Data in to Precharge? 
     constant tCCD  : natural := 1;      -- Read/Write command to Read/Write command
     constant tCKED : natural := 1;      -- CKE to clock disable or power-down entry mode
     constant tPED  : natural := 1;      -- CKE to clock enable or power-down exit setup mode
@@ -105,17 +115,129 @@ package sdram_pkg is
     constant tCMH : time := 0.8 ns;     -- command hold time
     constant tCMS : time := 1.5 ns;     -- command setup time
 
+    -- cycle-converted timings
+    constant tRCCycles     : natural;   -- row cycle (ref to ref / activate to activate) [shortest row access strobe (Idle -> Access -> Idle)]
+    constant tRASminCycles : natural;   -- row address strobe (activate to precharge) [shortest row access time (capacitors take time to recover)]
+    constant tRASmaxCycles : natural;   -- row active hold time [longest time row can be held active]
+    constant tRPCycles     : natural;   -- row precharge time (min. time between precharging row and activating new one)
+    constant tRCDCycles    : natural;   -- RAS to CAS delay (active command to read/write command delay time) [min. time between activating a row and issuing Read/Write command]
+    constant tRRDCycles    : natural;   -- bank to bank delay time (min. time between successive Active commands to different banks)
+    constant tDPLCycles    : natural;   -- input data to Precharge command delay (also defined as tWR)
+    constant tDALCycles    : natural;   -- input data to Active/Refresh command delay (during Auto Precharge)
+    constant tXSRCycles    : natural;   -- exit to Self Refresh to Active
+    constant tREFCycles    : natural;   -- Refresh cycle time (all rows) [4096 for current SDRAM]
+
+    -- encode/decoed helper functions
     pure function decode_cmd(chipSelectNeg, rowAddrStrobeNeg, colAddrStrobeNeg, writeEnableNeg : std_logic) return Cmd_T;
     pure function encode_cmd(cmd : Cmd_T) return Cmd_Aggregate_R;
     pure function encode_mode_reg(burstLength : Burst_Length_T; burstType : Burst_Type_T; latencyMode : Latency_Mode_T; writeBurstMode : Write_Burst_Mode_T) return Data_T;
     pure function decode_mode_reg(modeReg : Data_T) return Mode_Reg_R;
+    pure function cmd_wait_cycles(cmd : Cmd_T) return natural;
+
+    -- cmd i/o interfacing helper functions
+    pure function active(row : Addr_T; bank : Bank_Addr_T) return Mem_IO_Aggregate_R;
+    pure function read(col : Col_Addr_T; bank : Bank_Addr_T; autoPrecharge : boolean) return Mem_IO_Aggregate_R;
+    pure function write(col : Col_Addr_T; bank : Bank_Addr_T; autoPrecharge : boolean; data : Data_T) return Mem_IO_Aggregate_R;
+    pure function precharge(bank : Bank_Addr_T; allBanks : boolean) return Mem_IO_Aggregate_R;
+    pure function burst_terminate return Mem_IO_Aggregate_R;
+    pure function refresh return Mem_IO_Aggregate_R;
+    pure function load_mode_reg(data : Data_T) return Mem_IO_Aggregate_R;
+    pure function nop return Mem_IO_Aggregate_R;
 
 end package sdram_pkg;
 
 package body sdram_pkg is
+    -- types
     subtype Cmd_Aggregate is std_logic_vector(3 downto 0);
     subtype Burst_Length_Logic_T is std_logic_vector(2 downto 0);
     subtype Latency_Mode_Logic_T is std_logic_vector(2 downto 0);
+
+    -- constants
+    constant REAL_PERIOD : real := real(CLK_PERIOD / 1 ps);
+
+    -- exported constants
+    impure function time_to_cycles(val : time) return natural is
+    begin
+        assert val >= 1 ns
+        report "Time divided by ps, don't use such low values";
+
+        return natural(ceil(real(val / 1 ps) / REAL_PERIOD));
+    end function time_to_cycles;
+
+    constant tRCCycles     : natural := time_to_cycles(tRC);
+    constant tRASminCycles : natural := time_to_cycles(tRASmin);
+    constant tRASmaxCycles : natural := time_to_cycles(tRASmax);
+    constant tRPCycles     : natural := time_to_cycles(tRP);
+    constant tRCDCycles    : natural := time_to_cycles(tRCD);
+    constant tRRDCycles    : natural := time_to_cycles(tRRD);
+    constant tDPLCycles    : natural := time_to_cycles(tDPL);
+    constant tDALCycles    : natural := time_to_cycles(tDAL);
+    constant tXSRCycles    : natural := time_to_cycles(tXSR);
+    constant tREFCycles    : natural := time_to_cycles(tREF);
+
+    -- functions
+    pure function active(row : Addr_T; bank : Bank_Addr_T) return Mem_IO_Aggregate_R is
+    begin
+        return (cmd => Active, bank => bank, addr => row, data => (others => 'Z'));
+    end function active;
+
+    pure function read(col : Col_Addr_T; bank : Bank_Addr_T; autoPrecharge : boolean) return Mem_IO_Aggregate_R is
+        variable tmpAddr : Addr_T := (others => '-');
+    begin
+        tmpAddr(10)                       := '1' when autoPrecharge else '0';
+        tmpAddr(Col_Addr_T'high downto 0) := col;
+
+        return (cmd => Read, bank => bank, addr => tmpAddr, data => (others => 'Z'));
+    end function read;
+
+    pure function write(col : Col_Addr_T; bank : Bank_Addr_T; autoPrecharge : boolean; data : Data_T) return Mem_IO_Aggregate_R is
+        variable tmpAddr : Addr_T := (others => '-');
+    begin
+        tmpAddr(10)                       := '1' when autoPrecharge else '0';
+        tmpAddr(Col_Addr_T'high downto 0) := col;
+
+        return (cmd => Write, bank => bank, addr => tmpAddr, data => data);
+    end function write;
+
+    pure function precharge(bank : Bank_Addr_T; allBanks : boolean) return Mem_IO_Aggregate_R is
+        variable tmpAddr : Addr_T := (others => '-');
+    begin
+        tmpAddr(10) := '1' when allBanks else '0';
+
+        return (cmd => Precharge, bank => bank, addr => tmpAddr, data => (others => 'Z'));
+    end function precharge;
+
+    pure function burst_terminate return Mem_IO_Aggregate_R is
+    begin
+        return (cmd => BurstTerminate, bank => (others => '-'), addr => (others => '-'), data => (others => 'Z'));
+    end function burst_terminate;
+
+    pure function refresh return Mem_IO_Aggregate_R is
+    begin
+        return (cmd => Refresh, bank => (others => '-'), addr => (others => '-'), data => (others => 'Z'));
+    end function refresh;
+
+    pure function load_mode_reg(data : Data_T) return Mem_IO_Aggregate_R is
+    begin
+        return (cmd => LoadModeReg, bank => (others => '-'), addr => (others => '-'), data => data);
+    end function load_mode_reg;
+
+    pure function nop return Mem_IO_Aggregate_R is
+    begin
+        return (cmd => NoOp, bank => (others => '-'), addr => (others => '-'), data => (others => 'Z'));
+    end function nop;
+
+    pure function cmd_wait_cycles(cmd : Cmd_T) return natural is
+    begin
+        case cmd is
+            when Active                                     => return tRCDCycles;
+            when Read                                       => return tCAS;
+            when Precharge                                  => return tRPCycles;
+            when Refresh                                    => return tRCCycles;
+            when LoadModeReg                                => return tMRD;
+            when CmdInhibit | NoOp | Write | BurstTerminate => return 0;
+        end case;
+    end function cmd_wait_cycles;
 
     pure function decode_cmd(chipSelectNeg, rowAddrStrobeNeg, colAddrStrobeNeg, writeEnableNeg : std_logic) return Cmd_T is
         variable cmdSelectAggregate : std_logic_vector(3 downto 0) := chipSelectNeg & rowAddrStrobeNeg & colAddrStrobeNeg & writeEnableNeg;
