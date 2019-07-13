@@ -143,6 +143,7 @@ package sdram_pkg is
     pure function refresh return Mem_IO_Aggregate_R;
     pure function load_mode_reg(data : Data_T) return Mem_IO_Aggregate_R;
     pure function nop return Mem_IO_Aggregate_R;
+    pure function nop(data : Data_T) return Mem_IO_Aggregate_R;
 
 end package sdram_pkg;
 
@@ -225,6 +226,11 @@ package body sdram_pkg is
     pure function nop return Mem_IO_Aggregate_R is
     begin
         return (cmd => NoOp, bank => (others => '-'), addr => (others => '-'), data => (others => 'Z'));
+    end function nop;
+
+    pure function nop(data : Data_T) return Mem_IO_Aggregate_R is
+    begin
+        return (cmd => noOp, bank => (others => '-'), addr => (others => '-'), data => data);
     end function nop;
 
     pure function cmd_wait_cycles(cmd : Cmd_T) return natural is
