@@ -3,7 +3,7 @@ use ieee.std_logic_1164.all;
 use ieee.numeric_std.all;
 use std.textio.all;
 
-package sdram_pkg is
+package sdram_model_pkg is
     constant BANK_COUNT : natural := 4;
 
     type State_T is (ACT, A_REF, BST, LMR, NOP, PRECH, READ, READ_A, WRITE, WRITE_A, LOAD_FILE, DUMP_FILE);
@@ -25,9 +25,9 @@ package sdram_pkg is
     function TO_INTEGER(input : std_logic_vector) return integer;
     PROCEDURE TO_BITVECTOR(VARIABLE input : IN INTEGER; variable output : out BIT_VECTOR);
 
-END sdram_pkg;
+END sdram_model_pkg;
 
-PACKAGE BODY sdram_pkg IS
+PACKAGE BODY sdram_model_pkg IS
 
     pure function toBool(val : std_logic) return boolean is
     begin
@@ -167,4 +167,4 @@ PACKAGE BODY sdram_pkg IS
         END IF;
     END TO_BITVECTOR;
 
-END sdram_pkg;
+END sdram_model_pkg;
