@@ -1,16 +1,14 @@
 library ieee;
-use ieee.numeric_std.all;
 use ieee.std_logic_1164.all;
+use ieee.numeric_std.all;
 use work.sdram_pkg.all;
 
-package ram_ctrl_pkg is
-    type Ctrl_Cmd_T is (NoOp, Read, Write, Refresh);
-    type Scheduler_Cmd_T is (Active, Precharge, PrechargeAll, Refresh);
-
+package sdram_ctrl_pkg is
     constant ADDR_WIDTH : natural := ROW_ADDR_WIDTH + BANK_ADDR_WIDTH;
 
+    type Ctrl_Cmd_T is (NoOp, Read, Write, Refresh);
     subtype Ctrl_Addr_T is unsigned(ADDR_WIDTH - 1 downto 0);
-    alias Ctrl_Data_T is Data_T;
+
     type Ctrl_Addr_R is record
         row  : Addr_T;
         bank : Bank_Addr_T;
@@ -20,36 +18,25 @@ package ram_ctrl_pkg is
         active : boolean;
         row    : Addr_T;
     end record Bank_State_R;
-    type Bank_State_Array_T is array (BANK_COUNT - 1 downto 0) of Bank_State_R;
+    type Bank_State_Array_T is array (0 to BANK_COUNT - 1) of Bank_State_R;
 
-    type Scheduler_Cmd_Array_T is array (1 downto 0) of Scheduler_Cmd_T;
-    type Scheduler_In_R is record
-        cmdArray     : Scheduler_Cmd_Array_T;
-        arrayPtr     : natural range Scheduler_Cmd_Array_T'range;
-        addr         : Ctrl_Addr_R;
-        batchExecute : boolean;
-    end record Scheduler_In_R;
-
-    type Scheduler_Out_R is record
-        batchDone : boolean;
-        memIo     : Mem_IO_Aggregate_R;
-    end record Scheduler_Out_R;
+    type Scheduled_Cmd_R is record
+        cmd        : Cmd_T;
+        addr       : Ctrl_Addr_R;
+        startBurst : boolean;
+        done       : boolean;
+    end record Scheduled_Cmd_R;
 
     type Burst_State_R is record
-        bursting : boolean;
-        counter  : natural range 0 to 2**COL_ADDR_WIDTH;
-        bank     : Bank_Addr_T;
-        reading  : boolean;
+        inBurst : boolean;
+        counter : natural range 0 to 2**COL_ADDR_WIDTH + tCAS;
     end record Burst_State_R;
 
     pure function next_row_addr(currAddr : Ctrl_Addr_T; rowMax : natural) return Ctrl_Addr_T;
     pure function addr_to_record(addr : Ctrl_Addr_T) return Ctrl_Addr_R;
-end package ram_ctrl_pkg;
+end package sdram_ctrl_pkg;
 
-library ieee;
-use ieee.std_logic_1164.all;
-package body ram_ctrl_pkg is
-
+package body sdram_ctrl_pkg is
     -- prevent addr overflow
     pure function next_row_addr(currAddr : Ctrl_Addr_T; rowMax : natural) return Ctrl_Addr_T is
     begin
@@ -67,4 +54,5 @@ package body ram_ctrl_pkg is
             bank => addr(BANK_ADDR_WIDTH - 1 downto 0)
         );
     end function addr_to_record;
-end package body ram_ctrl_pkg;
+
+end package body sdram_ctrl_pkg;

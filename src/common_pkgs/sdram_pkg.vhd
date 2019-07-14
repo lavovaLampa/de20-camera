@@ -127,12 +127,19 @@ package sdram_pkg is
     constant tXSRCycles    : natural;   -- exit to Self Refresh to Active
     constant tREFCycles    : natural;   -- Refresh cycle time (all rows) [4096 for current SDRAM]
 
-    -- encode/decoed helper functions
+    -- encode/decode sdram commands (read, write, etc.)
     pure function decode_cmd(chipSelectNeg, rowAddrStrobeNeg, colAddrStrobeNeg, writeEnableNeg : std_logic) return Cmd_T;
     pure function encode_cmd(cmd : Cmd_T) return Cmd_Aggregate_R;
+    -- encode/decode mode register
     pure function encode_mode_reg(burstLength : Burst_Length_T; burstType : Burst_Type_T; latencyMode : Latency_Mode_T; writeBurstMode : Write_Burst_Mode_T) return Data_T;
     pure function decode_mode_reg(modeReg : Data_T) return Mode_Reg_R;
-    pure function cmd_wait_cycles(cmd : Cmd_T) return natural;
+
+    /** 
+     * Return min. number of cycles the ctrl has to wait after requesting specified command.
+     * Controller can receive another command in tNow + return_val cycles.
+     * E.g. 1 means controller can send next command right during the next clock cycle. 
+     **/
+    pure function cmd_delay(cmd : Cmd_T) return natural;
 
     -- cmd i/o interfacing helper functions
     pure function active(row : Addr_T; bank : Bank_Addr_T) return Mem_IO_Aggregate_R;
@@ -233,7 +240,7 @@ package body sdram_pkg is
         return (cmd => noOp, bank => (others => '-'), addr => (others => '-'), data => data);
     end function nop;
 
-    pure function cmd_wait_cycles(cmd : Cmd_T) return natural is
+    pure function cmd_delay(cmd : Cmd_T) return natural is
     begin
         case cmd is
             when Active                                     => return tRCDCycles;
@@ -241,9 +248,9 @@ package body sdram_pkg is
             when Precharge                                  => return tRPCycles;
             when Refresh                                    => return tRCCycles;
             when LoadModeReg                                => return tMRD;
-            when CmdInhibit | NoOp | Write | BurstTerminate => return 0;
+            when CmdInhibit | NoOp | Write | BurstTerminate => return 1;
         end case;
-    end function cmd_wait_cycles;
+    end function cmd_delay;
 
     pure function decode_cmd(chipSelectNeg, rowAddrStrobeNeg, colAddrStrobeNeg, writeEnableNeg : std_logic) return Cmd_T is
         variable cmdSelectAggregate : std_logic_vector(3 downto 0) := chipSelectNeg & rowAddrStrobeNeg & colAddrStrobeNeg & writeEnableNeg;
