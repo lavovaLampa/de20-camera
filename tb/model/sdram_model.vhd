@@ -673,6 +673,7 @@ begin
             wait;
         end process mainCtrl;
 
+        -- check if sdram is being properly refreshed at least every tREF
         refreshCheckProc : process(clkInternal)
             variable lastRefreshCycle : time                                 := NOW;
             variable refreshCounter   : natural range 0 to 2**ROW_ADDR_WIDTH := 2**ROW_ADDR_WIDTH;
@@ -693,10 +694,55 @@ begin
             end if;
         end process refreshCheckProc;
 
+        -- we should check for proper sdram initialization after power-on
         initCheckProc : process(clkInternal)
+            type Internal_State_T is (InitialWait, PrechargeAll, Refresh, SetModeReg, Done);
+
+            variable currState : Internal_State_T := InitialWait;
+            variable counter   : natural          := 200 us / CLK_PERIOD;
         begin
             if rising_edge(clkInternal) then
+                case currState is
+                    when InitialWait =>
+                        if counter = 0 then
+                            currState := PrechargeAll;
+                        else
+                            counter := counter - 1;
+                        end if;
 
+                    when PrechargeAll =>
+                        if inputReg.cmd = Precharge and inputReg.addr(10) = '1' then
+                            currState := Refresh;
+                            counter   := 2**(ROW_ADDR_WIDTH + 1);
+                        elsif inputReg.cmd /= NoOp or inputReg.cmd /= CmdInhibit then
+                            report "Didn't receive a PrechargeAll command after stable clock & power during initialization"
+                            severity error;
+                        end if;
+
+                    when Refresh =>
+                        if inputReg.cmd = Refresh then
+                            if counter = 0 then
+                                currState := SetModeReg;
+                            else
+                                counter := counter - 1;
+                            end if;
+                        elsif inputReg.cmd /= NoOp and inputReg.cmd /= CmdInhibit then
+                            report "Didn't receive a Refresh command 4096*2 times after Precharge all during initialization"
+                            severity error;
+                        end if;
+
+                    when SetModeReg =>
+                        if inputReg.cmd = LoadModeReg then
+                            currState := Done;
+                        elsif inputReg.cmd /= NoOp and inputReg.cmd /= CmdInhibit then
+                            report "Didn't receive a Load Mode Register command after refreshing all rows during initialization"
+                            severity error;
+                        end if;
+
+                    when Done =>
+                        isInitialized <= true;
+
+                end case;
             end if;
         end process initCheckProc;
     end block ctrlBlock;
