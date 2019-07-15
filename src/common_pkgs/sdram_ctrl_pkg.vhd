@@ -28,24 +28,26 @@ package sdram_ctrl_pkg is
     end record Scheduled_Cmd_R;
 
     type Burst_State_R is record
-        inBurst : boolean;
-        counter : natural range 0 to 2**COL_ADDR_WIDTH + tCAS;
+        inBurst   : boolean;
+        counter   : natural range 0 to 2**COL_ADDR_WIDTH + tCAS;
+        precharge : boolean;
     end record Burst_State_R;
 
-    pure function next_row_addr(currAddr : Ctrl_Addr_T; rowMax : natural) return Ctrl_Addr_T;
+    type Prefetch_Data_R is record
+        lastAddr     : Ctrl_Addr_R;
+        cmdCounter   : natural range 0 to 7;
+        isPrefetched : boolean;
+    end record Prefetch_Data_R;
+
+    pure function next_row_addr(addrRecord : Ctrl_Addr_R; rowMax : natural) return Ctrl_Addr_R;
     pure function addr_to_record(addr : Ctrl_Addr_T) return Ctrl_Addr_R;
 end package sdram_ctrl_pkg;
 
 package body sdram_ctrl_pkg is
-    -- prevent addr overflow
-    pure function next_row_addr(currAddr : Ctrl_Addr_T; rowMax : natural) return Ctrl_Addr_T is
+    pure function record_to_addr(addr : Ctrl_Addr_R) return Ctrl_Addr_T is
     begin
-        if currAddr < rowMax - 1 then
-            return currAddr + 1;
-        else
-            return (others => '0');
-        end if;
-    end function next_row_addr;
+        return addr.row & addr.bank;
+    end function record_to_addr;
 
     pure function addr_to_record(addr : Ctrl_Addr_T) return Ctrl_Addr_R is
     begin
@@ -54,5 +56,16 @@ package body sdram_ctrl_pkg is
             bank => addr(BANK_ADDR_WIDTH - 1 downto 0)
         );
     end function addr_to_record;
+
+    -- prevent addr overflow
+    pure function next_row_addr(addrRecord : Ctrl_Addr_R; rowMax : natural) return Ctrl_Addr_R is
+        variable currAddr : Ctrl_Addr_T := record_to_addr(addrRecord);
+    begin
+        if currAddr < rowMax - 1 then
+            return addr_to_record(currAddr + 1);
+        else
+            return addr_to_record((others => '0'));
+        end if;
+    end function next_row_addr;
 
 end package body sdram_ctrl_pkg;
