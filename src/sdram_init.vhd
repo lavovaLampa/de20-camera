@@ -18,9 +18,13 @@ entity sdram_init is
 end entity sdram_init;
 
 architecture RTL of sdram_init is
-    signal waitCounter : natural range 0 to INIT_DELAY_CYCLES + 100 := 0;
-    signal nextData    : Data_T                                     := (others => 'Z');
-    signal nextIo      : Mem_IO_Aggregate_R                         := nop;
+    type Internal_State_T is (InitDelay, PrechargeAll, Refresh, LoadModeReg, Done);
+    signal waitCounter : integer range -10 to INIT_DELAY_CYCLES + 100 := 0;
+    signal nextData    : Data_T                                       := (others => 'Z');
+    signal nextIo      : Mem_IO_Aggregate_R                           := nop;
+
+    -- debug signals
+    signal dbgInternalState : Internal_State_T;
 begin
     -- pack mem i/o with data
     memIoOut <= (
@@ -31,8 +35,6 @@ begin
     );
 
     initProc : process(clkIn, rstAsyncIn)
-        type Internal_State_T is (InitDelay, PrechargeAll, Refresh, LoadModeReg, Done);
-
         -- reg
         variable currState      : Internal_State_T                           := InitDelay;
         -- we have to refresh all rows 2 times -> 2 * 2**ROW_ADDR_WIDTH = 2**(ROW_ADDR_WIDTH + 1)
@@ -54,7 +56,7 @@ begin
 
             if clkStableIn then
                 clkEnableOut <= '1';
-                waitCounter  <= waitCounter - 1;
+                waitCounter  <= waitCounter - 1 when currState /= Done;
 
                 case currState is
                     when InitDelay =>
@@ -96,5 +98,8 @@ begin
                 end case;
             end if;
         end if;
+
+        -- debug signals
+        dbgInternalState <= currState;
     end process initProc;
 end architecture RTL;

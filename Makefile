@@ -57,6 +57,11 @@ i2c_ccd_config : $(GHDL_LIB_INFO) $(LIBS) $(TB_DIR)/i2c_ccd_config_tb.vhd $(SRC_
 	$(GHDL_CMD) -m $(ELABORATE_OPTS) --workdir=$(WORKDIR) i2c_ccd_config_tb
 	$(GHDL_CMD) -r $(RUN_OPTS) --workdir=$(WORKDIR) i2c_ccd_config_tb $(GHW_OPTS)
 
+.PHONY : sdram_ctrl
+sdram_ctrl : $(GHDL_LIB_INFO) $(LIBS) $(TB_DIR)/sdram_ctrl_tb.vhd $(SRC_DIR)/sdram_ctrl.vhd $(SRC_DIR)/sdram_init.vhd
+	$(GHDL_CMD) -m $(ELABORATE_OPTS) --workdir=$(WORKDIR) sdram_ctrl_tb
+	$(GHDL_CMD) -r $(RUN_OPTS) --workdir=$(WORKDIR) sdram_ctrl_tb $(GHW_OPTS)
+
 .PHONY : show-wave
 show-wave : $(WORKDIR)/$(VCD_OUT_NAME)
 	$(VIEW_CMD) $(WORKDIR)/$(VCD_OUT_NAME)
