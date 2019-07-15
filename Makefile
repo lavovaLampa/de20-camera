@@ -2,13 +2,15 @@
 SRC_DIR = src
 TB_DIR = tb
 LIB_DIR = $(SRC_DIR)/common_pkgs
-TB_LIB_DIR = $(TB_DIR)/common
+TB_LIB_DIR = $(TB_DIR)/common_pkgs
+TB_MODEL_DIR = $(TB_DIR)/model
 
 # list all sources
 LIBS = $(wildcard $(LIB_DIR)/*.vhd)
 LIBS += $(wildcard $(TB_LIB_DIR)/*.vhd)
 FILES = $(wildcard $(SRC_DIR)/*.vhd)
 FILES += $(wildcard $(TB_DIR)/*.vhd)
+FILES += $(wildcard $(TB_MODEL_DIR)/*.vhd)
 FILES += $(LIBS)
 
 # simulator (GHDL) variables
@@ -19,8 +21,8 @@ GHW_OUT_NAME = $(OUT_NAME).ghw
 WORKDIR = work
 MAKE_OPTS = --std=08
 ANALYSIS_OPTS = --std=08 
-ELABORATE_OPTS = --std=08
-RUN_OPTS = --std=08 -Wunused -Wothers -Wstatic 
+ELABORATE_OPTS = --std=08 -g
+RUN_OPTS = --std=08 -Wunused -Wothers -Wstatic -g
 VCD_OPTS = --vcd=$(WORKDIR)/$(VCD_OUT_NAME)
 GHW_OPTS = --wave=$(WORKDIR)/$(GHW_OUT_NAME)
 
@@ -32,7 +34,7 @@ VIEW_CMD = gtkwave
 
 # import sources
 $(GHDL_LIB_INFO) : $(FILES) $(WORKDIR) $(LIBS)
-	$(GHDL_CMD) -i $(MAKE_OPTS) --workdir=$(WORKDIR) $(SRC_DIR)/*.vhd $(TB_DIR)/*.vhd $(LIB_DIR)/*.vhd $(TB_LIB_DIR)/*.vhd
+	$(GHDL_CMD) -i $(MAKE_OPTS) --workdir=$(WORKDIR) $(SRC_DIR)/*.vhd $(TB_DIR)/*.vhd $(LIB_DIR)/*.vhd $(TB_LIB_DIR)/*.vhd $(TB_MODEL_DIR)/*.vhd
 
 $(WORKDIR) :
 	mkdir $(WORKDIR)

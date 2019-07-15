@@ -3,64 +3,13 @@ use ieee.std_logic_1164.all;
 use ieee.numeric_std.all;
 use ieee.math_real.all;
 use std.textio.all;
-use work.sdram_pkg_new.all;
+
+use work.sdram_model_pkg.all;
+use work.sdram_pkg.all;
 
 -- SDRAM must support CONCURRENT AUTO PRECHARGE
-entity sdram_model_new is
+entity sdram_model is
     generic(
-        -- input clk period
-        CLK_PERIOD       : time    := 7.5 ns;
-        -- command timings
-        tRC              : time    := 55 ns; -- row cycle (ref to ref / activate to activate) [shortest row access strobe (Idle -> Access -> Idle)]
-        tRAS             : time    := 40 ns; -- row address strobe (activate to precharge) [shortest row access time (capacitors take time to recover)]
-        tRP              : time    := 15 ns; -- row precharge time (min. time between precharging row and activating new one)
-        tRCD             : time    := 15 ns; -- RAS to CAS delay (active command to read/write command delay time) [min. time between activating a row and issuing Read/Write command]
-        tRRD             : time    := 10 ns; -- bank to bank delay time (min. time between successive Active commands to different banks)
-        tDPL             : time    := 2 * CLK_PERIOD; -- input data to Precharge command delay (also defined as tWR)
-        tDAL             : time    := (2 * CLK_PERIOD) + tRP; -- input data to Active/Refresh command delay (during Auto Precharge)
-        tXSR             : time    := 60 ns; -- exit to Self Refresh to Active
-        tREF             : time    := 64 ms; -- Refresh cycle time (all rows) [4096 for current SDRAM]
-
-        -- command-related timings defined in clock cycles
-        -- tDAL : natural := 4;
-        -- tDPL : natural := 2;
-        tCCD             : natural := 1; -- Read/Write command to Read/Write command
-        tCKED            : natural := 1; -- CKE to clock disable or power-down entry mode
-        tPED             : natural := 1; -- CKE to clock enable or power-down exit setup mode
-        tDQD             : natural := 0; -- DQM to input data delay
-        tDQM             : natural := 0; -- DQM to data mask during Writes
-        tDQZ             : natural := 2; -- DQM to data high-impedance during Reads
-        tDWD             : natural := 0; -- Write command to input data delay
-        tBDL             : natural := 1; -- Last data-in to Burst Terminate command
-        tCDL             : natural := 1; -- Last data-in to new Read/Write command
-        tRDL             : natural := 2; -- Last data-in to Precharge command
-        tMRD             : natural := 2; -- Load Mode Register command to Active or Refresh command
-        tROH             : natural := 2; -- Data-out ot high-impedance from Precharge command
-
-        -- low-level timings
-        tAC              : time    := 6.0 ns; -- max. access time from clk
-        tHZ              : time    := 7.0 ns; -- output high impedance time
-        tOH              : time    := 2.7 ns; -- output data hold time
-        tWRa             : time    := 7.5 ns; -- A2 Version - Auto precharge mode only (1 Clk + 7.5 ns)
-        tWRp             : time    := 15.0 ns; -- A2 Version - Precharge mode only (15 ns)
-        tCKA             : time    := 0 ns; -- CKE to CLK recovery delay time
-        tAH              : time    := 0.8 ns; -- address hold time
-        tAS              : time    := 1.5 ns; -- address setup time
-        tCH              : time    := 2.5 ns; -- clk high level width
-        tCL              : time    := 2.5 ns; -- clk low level width
-        tCK              : time    := 7.5 ns; -- clk cycle time
-        tDH              : time    := 0.8 ns; -- input data hold time
-        tDS              : time    := 1.5 ns; -- input data setup time
-        tCKH             : time    := 0.8 ns; -- CKE hold time (clk enable?)
-        tCKS             : time    := 1.5 ns; -- CKE setup time
-        tCMH             : time    := 0.8 ns; -- command hold time
-        tCMS             : time    := 1.5 ns; -- command setup time
-
-        -- ram parameters
-        ADDR_WIDTH       : natural := 12; -- addr bus width for mem. row selection
-        COL_WIDTH        : natural := 8; -- addr bus width for mem. column selection
-        DATA_WIDTH       : natural := 16; -- mem i/o data path width
-
         -- simulation settings
         LOAD_FROM_FILE   : boolean := false; -- whether to load memory content from file
         DUMP_TO_FILE     : boolean := false; -- whether to store memory content to a file
@@ -69,53 +18,20 @@ entity sdram_model_new is
     );
     port(
         clkIn                                : in    std_logic;
-        addrIn                               : in    unsigned(ADDR_WIDTH - 1 downto 0);
-        dataIn                               : inout std_logic_vector(DATA_WIDTH - 1 downto 0);
-        bankSelectIn                         : in    unsigned(1 downto 0);
+        addrIn                               : in    Addr_T;
+        dataIn                               : inout Data_T  := (others => 'Z');
+        bankSelectIn                         : in    Bank_Addr_T;
         clkEnableIn                          : in    std_logic;
         chipSelectNegIn, rowAddrStrobeNegIn  : in    std_logic;
         colAddrStrobeNegIn, writeEnableNegIn : in    std_logic;
         dqmIn                                : in    std_logic_vector(1 downto 0);
+        -- debug signals
+        isInitialized                        : out   boolean := false;
         simEnded                             : in    boolean
     );
-    subtype Mem_Data_T is std_logic_vector(DATA_WIDTH - 1 downto 0);
-    subtype Mem_Addr_T is unsigned(ADDR_WIDTH - 1 downto 0);
+end entity sdram_model;
 
-    -- TODO: fix duplicate types
-    subtype Bank_T is natural range 0 to BANK_COUNT - 1;
-    subtype Row_T is natural range 0 to 2**ADDR_WIDTH - 1;
-    subtype Col_T is natural range 0 to 2**COL_WIDTH - 1;
-
-    type Bank_State_R is record
-        state : Bank_State_T;
-        row   : Row_T;
-    end record Bank_State_R;
-    type Bank_Array_T is array (BANK_COUNT - 1 downto 0) of Bank_State_R;
-
-    type Ctrl_State_R is record
-        state         : Ctrl_State_T;
-        autoPrecharge : boolean;
-        currBank      : Bank_T;
-        burstDone     : boolean;
-    end record Ctrl_State_R;
-
-    type Input_Latch_R is record
-        cmd  : Cmd_T;
-        dqm  : std_logic_vector(1 downto 0);
-        addr : Mem_Addr_T;
-        bank : unsigned(1 downto 0);
-        data : Mem_Data_T;
-    end record Input_Latch_R;
-
-    subtype Latency_Mode_Range_T is natural range 2 to 3;
-    subtype Burst_Length_Range_T is natural range 1 to 2**COL_WIDTH - 1;
-    constant PAGE_LEN : natural := 2**COL_WIDTH;
-    subtype Bank_Range_T is natural range 0 to BANK_COUNT - 1;
-    subtype Row_Range_T is natural range 0 to 2**ADDR_WIDTH - 1;
-    subtype Col_Range_T is natural range 0 to 2**COL_WIDTH - 1;
-end entity sdram_model_new;
-
-architecture model of sdram_model_new is
+architecture model of sdram_model is
     -- mode register (register)
     signal modeReg : std_logic_vector(DATA_WIDTH - 1 downto 0) := (others => '0');
 
@@ -123,10 +39,10 @@ architecture model of sdram_model_new is
     signal currCmd : Cmd_T := NoOp;
 
     -- decoded state from mode register (wire)
-    signal burstLength    : Burst_Length_Range_T := -1;
-    signal burstType      : Burst_Type_T         := Sequential;
-    signal latencyMode    : Latency_Mode_Range_T := 2;
-    signal writeBurstMode : Write_Burst_Mode_T   := ProgrammedLength;
+    signal burstLength    : Burst_Length_T     := 1;
+    signal burstType      : Burst_Type_T       := Sequential;
+    signal latencyMode    : Latency_Mode_T     := 2;
+    signal writeBurstMode : Write_Burst_Mode_T := ProgrammedLength;
 
     -- internal signals (reg)
     signal clkInternal : std_logic := '0';
@@ -180,7 +96,7 @@ begin
             Precharge when "0010",
             Refresh when "0001",
             LoadModeReg when "0000",
-            CmdError when others;
+            NoOp when others;
 
         with modeReg(2 downto 0) select burstLength <=
             1 when "000",
@@ -207,7 +123,7 @@ begin
     end block decodeBlock;
 
     ctrlBlock : block
-        type Data_Out_Pipeline_T is array (0 to 9) of Mem_Data_T;
+        type Data_Out_Pipeline_T is array (0 to 9) of Data_T;
 
         -- ctrl/banks state representation (reg)
         signal banks           : Bank_Array_T        := (others => (state => Idle, row => 0));
@@ -274,9 +190,9 @@ begin
             variable activeCounter : natural range 0 to 10; -- TODO: generic upper limit
 
             -- helper variables
-            variable bankPtr : Bank_T  := 0;
-            variable addrPtr : Row_T   := 0;
-            variable a10Flag : boolean := false;
+            variable bankPtr : Bank_Ptr_T := 0;
+            variable addrPtr : Row_Ptr_T  := 0;
+            variable a10Flag : boolean    := false;
         begin
             if rising_edge(clkInternal) then
                 -- helper variables
@@ -431,8 +347,8 @@ begin
                             end if;
                         end if;
 
-                    -- ingnore NoOp, CmdInhibit, LoadModeReg, CmdError, BurstTerminate
-                    when NoOp | CmdInhibit | LoadModeReg | CmdError | BurstTerminate =>
+                    -- ingnore NoOp, CmdInhibit, LoadModeReg, BurstTerminate
+                    when NoOp | CmdInhibit | LoadModeReg | BurstTerminate =>
                         null;
                 end case;
             end if;
@@ -440,26 +356,26 @@ begin
 
         -- main controlling process
         mainCtrl : process
-            type Mem_Row_T is array (0 to 2**COL_WIDTH - 1) of bit_vector(DATA_WIDTH - 1 downto 0);
+            type Mem_Row_T is array (0 to 2**COL_ADDR_WIDTH - 1) of bit_vector(DATA_WIDTH - 1 downto 0);
             type Mem_Row_Ptr_T is access Mem_Row_T;
-            type Mem_Bank_T is array (0 to 2**ADDR_WIDTH - 1) of Mem_Row_Ptr_T;
-            type Mem_Bank_Array_T is array (Bank_Range_T) of Mem_Bank_T;
+            type Mem_Bank_T is array (0 to 2**ROW_ADDR_WIDTH - 1) of Mem_Row_Ptr_T;
+            type Mem_Bank_Array_T is array (Bank_Ptr_T) of Mem_Bank_T;
 
             -- memory data storage
             variable bankData : Mem_Bank_Array_T;
 
             -- helper memory procedures
-            procedure init_mem(bank : in Bank_Range_T; row : in Row_Range_T) is
+            procedure init_mem(bank : in Bank_Ptr_T; row : in Row_Ptr_T) is
             begin
                 if bankData(bank)(row) = NULL then
                     bankData(bank)(row) := new Mem_Row_T;
-                    for col in Col_Range_T loop
+                    for col in Col_Ptr_T loop
                         bankData(bank)(row)(col) := (others => '0');
                     end loop;
                 end if;
             end procedure init_mem;
 
-            procedure write_mem(bank : in Bank_Range_T; row : in Row_Range_T; col : in Col_Range_T; data : in Mem_Data_T; dqm : in std_logic_vector(1 downto 0)) is
+            procedure write_mem(bank : in Bank_Ptr_T; row : in Row_Ptr_T; col : in Col_Ptr_T; data : in Data_T; dqm : in std_logic_vector(1 downto 0)) is
             begin
                 -- if data = all zeroes, we don't have to do nothing, that's the default state of mem
                 if data /= (data'range => '0') and dqm /= (dqm'range => '1') then
@@ -474,8 +390,8 @@ begin
                 end if;
             end procedure write_mem;
 
-            impure function read_mem(bank : in Bank_Range_T; row : in Row_Range_T; col : in Col_Range_T; dqm : in std_logic_vector(1 downto 0)) return Mem_Data_T is
-                variable tmpData : Mem_Data_T := (others => '0');
+            impure function read_mem(bank : in Bank_Ptr_T; row : in Row_Ptr_T; col : in Col_Ptr_T; dqm : in std_logic_vector(1 downto 0)) return Data_T is
+                variable tmpData : Data_T := (others => '0');
             begin
                 if bankData(bank)(row) = NULL then
                     tmpData := (others => '0');
@@ -494,25 +410,6 @@ begin
                 return tmpData;
             end function read_mem;
 
-            pure function validate_mode_reg(val : std_logic_vector(DATA_WIDTH - 1 downto 0)) return boolean is
-                variable burstLength    : std_logic_vector(2 downto 0) := val(2 downto 0);
-                variable burstType      : std_logic                    := val(3);
-                variable latencyMode    : std_logic_vector(2 downto 0) := val(6 downto 4);
-                variable operatingMode  : std_logic_vector(1 downto 0) := val(8 downto 7);
-                variable writeBurstMode : std_logic                    := val(9);
-                variable reserved       : std_logic_vector(1 downto 0) := val(11 downto 10);
-                variable isValid        : boolean                      := true;
-            begin
-                isValid := isValid and (burstLength = "000" or burstLength = "001" or burstLength = "010" or burstLength = "011" or burstLength = "111");
-                isValid := isValid and (burstType = '1' or burstType = '0');
-                isValid := isValid and not (burstLength = "111" and burstType = '1');
-                isValid := isValid and (latencyMode = "010" or latencyMode = "011");
-                isValid := isValid and operatingMode = "00";
-                isValid := isValid and (writeBurstMode = '1' or writeBurstMode = '0');
-                isValid := isValid and reserved = "00";
-                return isValid;
-            end function validate_mode_reg;
-
             -- tmp
             variable loadDone                                 : boolean := false;
             file inputFile, outputFile                        : text;
@@ -522,11 +419,11 @@ begin
             variable tmpCol                                   : bit_vector(DATA_WIDTH - 1 downto 0);
 
             -- state variables
-            variable currCol      : Col_T                               := 0;
-            variable burstCounter : natural range 0 to 2**COL_WIDTH - 1 := 0;
+            variable currCol      : Col_Ptr_T                                := 0;
+            variable burstCounter : natural range 0 to 2**COL_ADDR_WIDTH - 1 := 0;
 
-            impure function get_curr_col return Col_Range_T is
-                constant COL_END : natural := 2**COL_WIDTH - 1;
+            impure function get_curr_col return Col_Ptr_T is
+                constant COL_END : natural := 2**COL_ADDR_WIDTH - 1;
                 variable tmp     : natural;
             begin
                 tmp := currCol + burstCounter;
@@ -539,10 +436,10 @@ begin
             end function get_curr_col;
 
             -- helper variables
-            variable bankPtr                        : Bank_T     := 0;
-            variable addrPtr                        : Row_T      := 0;
+            variable bankPtr                        : Bank_Ptr_T := 0;
+            variable addrPtr                        : Row_Ptr_T  := 0;
             variable a10Flag                        : boolean    := false;
-            variable data                           : Mem_Data_T := (others => 'Z');
+            variable data                           : Data_T     := (others => 'Z');
             variable isPrechargingAll, isRefreshing : boolean    := false;
         begin
             if LOAD_FROM_FILE and not loadDone then
@@ -558,20 +455,20 @@ begin
                     read(inputLine, bankCount);
                     assert bankCount = BANK_COUNT;
                     read(inputLine, rowCount);
-                    assert rowCount = 2**ADDR_WIDTH;
+                    assert rowCount = 2**ROW_ADDR_WIDTH;
                     read(inputLine, colCount);
-                    assert colCount = 2**COL_WIDTH;
+                    assert colCount = 2**COL_ADDR_WIDTH;
                     read(inputLine, dataWidth);
                     assert dataWidth = DATA_WIDTH;
 
                     for bank in 0 to BANK_COUNT - 1 loop
-                        for row in Row_T loop
+                        for row in Row_Ptr_T loop
                             readline(inputFile, inputLine);
                             read(inputLine, rowUsed);
 
                             if rowUsed then
                                 init_mem(bank, row);
-                                for col in Col_T loop
+                                for col in Col_Ptr_T loop
                                     read(inputLine, tmpCol);
                                     bankData(bank)(row)(col) := tmpCol;
                                 end loop;
@@ -703,7 +600,7 @@ begin
                             burstCounter := 0;
 
                         when Precharge =>
-                            assert (ctrl.state /= WriteBurst and ctrl.state /= Readburst) or (not ctrl.autoPrecharge) or (not a10Flag and ctrl.currBank /= bankPtr)
+                            assert (ctrl.state /= WriteBurst and ctrl.state /= ReadBurst) or (not ctrl.autoPrecharge) or (not a10Flag and ctrl.currBank /= bankPtr)
                             report "Cannot truncate a Read/Write burst with Auto Precharge enabled using Precharge command"
                             severity error;
 
@@ -738,9 +635,10 @@ begin
                         when Refresh | Active =>
                             null;
 
-                        when CmdError =>
-                            report "Cannot decode command"
-                            severity error;
+                            -- TODO: implement command error handling
+                            --                        when CmdError =>
+                            --                            report "Cannot decode command"
+                            --                            severity error;
 
                     end case;
                 end if;
@@ -751,18 +649,18 @@ begin
                 file_open(outputFile, OUTPUT_FILE_NAME, write_mode);
 
                 write(outputLine, BANK_COUNT);
-                write(outputLine, 2**ADDR_WIDTH);
-                write(outputLine, 2**COL_WIDTH);
+                write(outputLine, 2**ROW_ADDR_WIDTH);
+                write(outputLine, 2**COL_ADDR_WIDTH);
                 write(outputLine, DATA_WIDTH);
                 writeline(outputFile, outputLine);
 
-                for bank in Bank_Range_T loop
-                    for row in Row_Range_T loop
+                for bank in Bank_Ptr_T loop
+                    for row in Row_Ptr_T loop
                         if bankData(bank)(row) = NULL then
                             write(outputLine, false);
                         else
                             write(outputLine, true);
-                            for col in Col_Range_T loop
+                            for col in Col_Ptr_T loop
                                 write(outputLine, bankData(bank)(row)(col));
                             end loop;
                         end if;
@@ -774,5 +672,32 @@ begin
 
             wait;
         end process mainCtrl;
+
+        refreshCheckProc : process(clkInternal)
+            variable lastRefreshCycle : time                                 := NOW;
+            variable refreshCounter   : natural range 0 to 2**ROW_ADDR_WIDTH := 2**ROW_ADDR_WIDTH;
+        begin
+            assert NOW - lastRefreshCycle < tREF
+            report "Didn't refresh all rows in time!"
+            severity error;
+
+            if rising_edge(clkInternal) then
+                if currCmd = Refresh then
+                    if refreshCounter = 0 then
+                        lastRefreshCycle := NOW;
+                        refreshCounter   := 2**ROW_ADDR_WIDTH;
+                    else
+                        refreshCounter := refreshCounter - 1;
+                    end if;
+                end if;
+            end if;
+        end process refreshCheckProc;
+
+        initCheckProc : process(clkInternal)
+        begin
+            if rising_edge(clkInternal) then
+
+            end if;
+        end process initCheckProc;
     end block ctrlBlock;
 end architecture model;
