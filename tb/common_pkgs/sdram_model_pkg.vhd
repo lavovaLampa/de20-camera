@@ -1,5 +1,6 @@
 library ieee;
 use ieee.std_logic_1164.all;
+use ieee.numeric_std.all;
 use work.sdram_pkg.all;
 
 package sdram_model_pkg is
@@ -29,9 +30,27 @@ package sdram_model_pkg is
     pure function logic_to_bool(val : std_logic) return boolean;
     pure function bank_next_state(currState : Bank_State_T) return Bank_State_T;
     pure function bank_transition_valid(currState : Bank_State_T; nextState : Bank_State_T) return boolean;
+    pure function to_safe_natural(val : unsigned) return natural;
+
+    -- return number of cycles required for bank to transition from currState to nextState
+    pure function bank_transition_delay(currState : Bank_State_T; nextState : Bank_State_T) return natural;
 end package sdram_model_pkg;
 
 package body sdram_model_pkg is
+    pure function to_safe_natural(val : unsigned) return natural is
+        variable hasMetavalue : boolean := false;
+    begin
+        for i in val'range loop
+            hasMetavalue := hasMetavalue or (val(i) /= '0' and val(i) /= '1');
+        end loop;
+
+        if hasMetavalue then
+            return 0;
+        else
+            return to_integer(val);
+        end if;
+    end function to_safe_natural;
+
     pure function logic_to_bool(val : std_logic) return boolean is
     begin
         case val is
@@ -84,4 +103,41 @@ package body sdram_model_pkg is
             return false;
         end if;
     end function bank_transition_valid;
+
+    pure function bank_transition_delay(currState : Bank_State_T; nextState : Bank_State_T) return natural is
+        type State_Delay_Map_T is array (Bank_State_T, Bank_State_T) of natural;
+        constant transitionDelay : State_Delay_Map_T := (
+            Idle             => (
+                Refreshing => 0,
+                Activating => 0,
+                others     => 0),
+            Refreshing       => (
+                Idle   => tRCCycles - 2,
+                others => 0
+            ),
+            Activating       => (
+                ActiveRecharging => tRCDCycles - 2,
+                others           => 0),
+            ActiveRecharging => (
+                ActiveIdle => tRASminCycles - tRCDCycles - 2,
+                others     => 0
+            ),
+            ActiveIdle       => (
+                Precharging => 0,
+                others      => 0
+            ),
+            Precharging      => (
+                Idle   => tRPCycles - 2,
+                others => 0
+            )
+        );
+    begin
+        if bank_transition_valid(currState, nextState) then
+            return transitionDelay(currState, nextState);
+        else
+            report "Invalid state transition!" & LF &
+                    "Cannot go from state " & Bank_State_T'image(currState) & " to state " & Bank_State_T'image(nextState)
+            severity error;
+        end if;
+    end function bank_transition_delay;
 end package body sdram_model_pkg;

@@ -20,7 +20,7 @@ entity i2c_slave_model is
     type Slave_State is (Receive, Acknowledge, IgnoreStop);
 end entity i2c_slave_model;
 
-architecture RTL of i2c_slave_model is
+architecture model of i2c_slave_model is
     signal testDataAggregate          : I2C_Aggregate;
     signal startReceived, endReceived : boolean := false;
     signal doAck, dataDone            : boolean := false;
@@ -49,7 +49,7 @@ begin
         elsif rising_edge(testClkIn) then
             -- value changed
             dataReceivedOut <= batchOK and not lastVal;
-            lastVal         := batchOk;
+            lastVal         := batchOK;
         end if;
     end process reportProc;
 
@@ -143,7 +143,7 @@ begin
                 debugPrint("received start bit");
                 endReceived   <= false;
                 startReceived <= true;
-                batchOk       <= false;
+                batchOK       <= false;
 
             -- if STOP bit received
             -- LOW to HIGH transition on DATA line while CLK is HIGH
@@ -175,7 +175,7 @@ begin
                        "Received: 0x" & to_hstring(tmpData) severity failure;
                 end if;
 
-                batchOk <= true;
+                batchOK <= true;
             end if;
         end if;
 
@@ -183,4 +183,4 @@ begin
         recvDataAddrOut <= tmpDataAddr;
         recvDataOut     <= tmpData;
     end process ctrlProc;
-end architecture RTL;
+end architecture model;

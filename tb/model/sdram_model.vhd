@@ -7,6 +7,9 @@ use std.textio.all;
 use work.sdram_model_pkg.all;
 use work.sdram_pkg.all;
 
+library osvvm;
+context osvvm.OsvvmContext;
+
 -- SDRAM must support CONCURRENT AUTO PRECHARGE
 entity sdram_model is
     generic(
@@ -33,7 +36,7 @@ end entity sdram_model;
 
 architecture model of sdram_model is
     -- mode register (register)
-    signal modeReg : std_logic_vector(DATA_WIDTH - 1 downto 0) := (others => '0');
+    signal modeReg : std_logic_vector(DATA_WIDTH - 1 downto 0) := encode_mode_reg(1, Sequential, 2, ProgrammedLength);
 
     -- decoded current command on input (wire) (non-latched)
     signal currCmd : Cmd_T := NoOp;
@@ -52,8 +55,7 @@ architecture model of sdram_model is
 begin
 
     decodeBlock : block
-        signal clkEnabled         : std_logic := '0';
-        signal cmdSelectAggregate : std_logic_vector(3 downto 0);
+        signal clkEnabled : std_logic := '0';
     begin
         -- clk enable is sampled on rising edge of clkIn
         clkProc : process(clkIn)
@@ -83,137 +85,85 @@ begin
             clkIn when '1',
             '0' when others;
 
-        -- decode signals to internal representation
-        cmdSelectAggregate <= chipSelectNegIn & rowAddrStrobeNegIn & colAddrStrobeNegIn & writeEnableNegIn;
+        -- decode cmd signals to internal representation
+        currCmd <= decode_cmd(chipSelectNegIn, rowAddrStrobeNegIn, colAddrStrobeNegIn, writeEnableNegIn);
 
-        with cmdSelectAggregate select currCmd <=
-            CmdInhibit when "1---",
-            NoOp when "0111",
-            Active when "0011",
-            Read when "0101",
-            Write when "0100",
-            BurstTerminate when "0110",
-            Precharge when "0010",
-            Refresh when "0001",
-            LoadModeReg when "0000",
-            NoOp when others;
-
-        with modeReg(2 downto 0) select burstLength <=
-            1 when "000",
-            2 when "001",
-            4 when "010",
-            8 when "011",
-            PAGE_LEN when "111",
-            1 when others;
-
-        with modeReg(3) select burstType <=
-            Sequential when '0',
-            Interleaved when '1',
-            Sequential when others;
-
-        with modeReg(6 downto 4) select latencyMode <=
-            2 when "010",
-            3 when "011",
-            2 when others;
-
-        with modeReg(9) select writeBurstMode <=
-            ProgrammedLength when '0',
-            SingleLocation when '1',
-            ProgrammedLength when others;
+        -- decode mode reg
+        burstLength    <= decode_mode_reg(modeReg).burstLength;
+        burstType      <= decode_mode_reg(modeReg).burstType;
+        latencyMode    <= decode_mode_reg(modeReg).latencyMode;
+        writeBurstMode <= decode_mode_reg(modeReg).writeBurstMode;
     end block decodeBlock;
 
     ctrlBlock : block
         type Data_Out_Pipeline_T is array (0 to 9) of Data_T;
 
+        -- TODO: is the upper counter limit OK?
+        type Bank_State_Helper_R is record
+            counting           : boolean;
+            counter            : natural range 0 to (tRCCycles + 1);
+            scheduledPrecharge : boolean;
+        end record Bank_State_Helper_R;
+        type Bank_Helpers_T is array (0 to BANK_COUNT - 1) of Bank_State_Helper_R;
+
+        -- populate bank state counter on state transition
+        pure function bank_schedule_transition(currState : Bank_State_T; nextState : Bank_State_T) return Bank_State_Helper_R is
+        begin
+            return (
+                counting           => true,
+                counter            => bank_transition_delay(currState, nextState),
+                scheduledPrecharge => false
+            );
+        end function bank_schedule_transition;
+
         -- ctrl/banks state representation (reg)
         signal banks           : Bank_Array_T        := (others => (state => Idle, row => 0));
         signal ctrl            : Ctrl_State_R;
         signal dataOutPipeline : Data_Out_Pipeline_T := (others => (others => 'Z'));
+
+        -- debug signals
+        signal bankCountersDbg : Bank_Helpers_T;
+
     begin
-
         bankCtrl : process(clkInternal)
-            -- FIXME: generify
-            constant PRE_TO_IDLE                      : natural := 2;
-            constant IDLE_TO_ACTIVE_RECHARGING        : natural := 2;
-            constant ACTIVE_RECHARGING_TO_ACTIVE_IDLE : natural := 3;
-            constant ACTIVE_TO_ACTIVE                 : natural := 2; -- derived from tRRD
-            constant REFRESH_TO_IDLE                  : natural := IDLE_TO_ACTIVE_RECHARGING + ACTIVE_RECHARGING_TO_ACTIVE_IDLE + PRE_TO_IDLE;
-
-            -- TODO: change upper counter limit
-            type Bank_State_Helper_R is record
-                counting           : boolean;
-                counter            : natural range 0 to 10;
-                scheduledPrecharge : boolean;
-            end record Bank_State_Helper_R;
-            type Bank_Helpers_T is array (0 to BANK_COUNT - 1) of Bank_State_Helper_R;
-
-            pure function get_delay(currState : Bank_State_T; nextState : Bank_State_T) return natural is
-                type State_Delay_Map_T is array (Bank_State_T, Bank_State_T) of natural;
-                constant transitionDelay : State_Delay_Map_T := (
-                    Idle             => (
-                        Refreshing => 0,
-                        Activating => 0,
-                        others     => 0),
-                    Refreshing       => (
-                        Idle   => REFRESH_TO_IDLE,
-                        others => 0
-                    ),
-                    Activating       => (
-                        ActiveRecharging => IDLE_TO_ACTIVE_RECHARGING,
-                        others           => 0
-                    ),
-                    ActiveRecharging => (
-                        ActiveIdle => ACTIVE_RECHARGING_TO_ACTIVE_IDLE,
-                        others     => 0
-                    ),
-                    ActiveIdle       => (
-                        Precharging => 0,
-                        others      => 0
-                    ),
-                    Precharging      => (
-                        Idle   => PRE_TO_IDLE,
-                        others => 0
-                    )
-                );
-            begin
-                if bank_transition_valid(currState, nextState) then
-                    return transitionDelay(currState, nextState);
-                else
-                    report "Invalid state transition!" & LF &
-                    "Cannot go from state " & Bank_State_T'image(currState) & " to state " & Bank_State_T'image(nextState)
-                    severity error;
-                end if;
-            end function get_delay;
-
             -- store timings
+
+            -- times bank state changes
             variable bankCounters  : Bank_Helpers_T := (others => (counting => false, counter => 0, scheduledPrecharge => false));
-            variable activeCounter : natural range 0 to 10; -- TODO: generic upper limit
+            -- times subsequent active commands
+            variable activeCounter : natural range 0 to tRRDCycles + 1;
 
             -- helper variables
             variable bankPtr : Bank_Ptr_T := 0;
             variable addrPtr : Row_Ptr_T  := 0;
             variable a10Flag : boolean    := false;
         begin
+            bankCountersDbg <= bankCounters;
+
             if rising_edge(clkInternal) then
                 -- helper variables
-                bankPtr := to_integer(inputReg.bank);
-                addrPtr := to_integer(inputReg.addr);
+                bankPtr := to_safe_natural(inputReg.bank);
+                addrPtr := to_safe_natural(inputReg.addr);
                 a10Flag := logic_to_bool(inputReg.addr(10));
 
                 -- resolve scheduled tasks
                 for i in 0 to BANK_COUNT - 1 loop
                     if bankCounters(i).scheduledPrecharge and banks(i).state = ActiveIdle then
                         banks(i).state          <= Precharging;
-                        bankCounters(i).counter := get_delay(Precharging, bank_next_state(Precharging));
+                        bankCounters(i).counter := bank_transition_delay(Precharging, bank_next_state(Precharging));
+
+                        Log("Bank " & to_string(i) & " state change scheduled: " & Bank_State_T'image(banks(i).state) & " --> " & Bank_State_T'image(Precharging), DEBUG);
                     end if;
 
                     if bankCounters(i).counting then
                         if bankCounters(i).counter = 0 then
                             banks(i).state <= bank_next_state(banks(i).state);
 
+                            Log("Bank " & to_string(i) & " state change scheduled: " & Bank_State_T'image(banks(i).state) & " --> " & Bank_State_T'image(bank_next_state(banks(i).state)), DEBUG);
+
                             -- if bank is Active schedule transition from ActiveIdle to ActiveRecharging
                             if banks(i).state = Activating then
-                                bankCounters(i).counter := get_delay(ActiveRecharging, ActiveIdle);
+                                bankCounters(i).counter := bank_transition_delay(ActiveRecharging, ActiveIdle);
                             else
                                 bankCounters(i).counting := false;
                             end if;
@@ -226,6 +176,11 @@ begin
                 -- decrement Active counter
                 if activeCounter > 0 then
                     activeCounter := activeCounter - 1;
+                end if;
+
+                -- debug log
+                if inputReg.cmd /= NoOp and inputReg.cmd /= CmdInhibit then
+                    Log("Received command: " & Cmd_T'image(inputReg.cmd), INFO);
                 end if;
 
                 -- handle current command on input latch
@@ -248,10 +203,12 @@ begin
                         report "Cannot issue another Active command right after last one (not enough time passed)"
                         severity error;
 
-                        banks(bankPtr).state          <= Activating;
-                        banks(bankPtr).row            <= addrPtr;
-                        bankCounters(bankPtr).counter := get_delay(Activating, bank_next_state(Activating));
-                        activeCounter                 := ACTIVE_TO_ACTIVE;
+                        banks(bankPtr).state  <= Activating;
+                        banks(bankPtr).row    <= addrPtr;
+                        bankCounters(bankPtr) := bank_schedule_transition(Activating, bank_next_state(Activating));
+                        activeCounter         := tRRDCycles;
+
+                        Log("Bank " & to_string(bankPtr) & " state change scheduled: " & Bank_State_T'image(banks(bankPtr).state) & " --> " & Bank_State_T'image(Activating), DEBUG);
 
                     -- close activated row (if idle does nothing)
                     -- a10 flags selects whether to Precharge all banks (a10 HIGH -> Precharge All)
@@ -280,8 +237,10 @@ begin
 
                                 -- if banks is idle, Precharge acts as NOP
                                 if (banks(i).state = ActiveIdle) then
-                                    banks(i).state          <= Precharging;
-                                    bankCounters(i).counter := get_delay(Precharging, bank_next_state(Precharging));
+                                    banks(i).state  <= Precharging;
+                                    bankCounters(i) := bank_schedule_transition(Precharging, bank_next_state(Precharging));
+
+                                    Log("Bank " & to_string(i) & " state change scheduled: " & Bank_State_T'image(banks(i).state) & " --> " & Bank_State_T'image(Precharging), DEBUG);
                                 end if;
                             end loop;
                         else            -- precharge only selected bank
@@ -302,8 +261,10 @@ begin
 
                             -- if bank is Idle, Precharge acts as NOP
                             if (banks(bankPtr).state = ActiveIdle) then
-                                banks(bankPtr).state          <= Precharging;
-                                bankCounters(bankPtr).counter := get_delay(Precharging, bank_next_state(Precharging));
+                                banks(bankPtr).state  <= Precharging;
+                                bankCounters(bankPtr) := bank_schedule_transition(Precharging, bank_next_state(Precharging));
+
+                                Log("Bank " & to_string(bankPtr) & " state change scheduled: " & Bank_State_T'image(banks(bankPtr).state) & " --> " & Bank_State_T'image(Precharging), DEBUG);
                             end if;
                         end if;
 
@@ -319,8 +280,10 @@ begin
                             report "Bank " & natural'image(i) & " not in Idle state, cannot start Auto Refresh"
                             severity error;
 
-                            banks(i).state          <= Refreshing;
-                            bankCounters(i).counter := get_delay(Refreshing, bank_next_state(Refreshing));
+                            banks(i).state  <= Refreshing;
+                            bankCounters(i) := bank_schedule_transition(Refreshing, bank_next_state(Refreshing));
+
+                            Log("Bank " & to_string(i) & " state change scheduled: " & Bank_State_T'image(banks(i).state) & " --> " & Bank_State_T'image(Refreshing), DEBUG);
                         end loop;
                         null;
 
@@ -337,8 +300,10 @@ begin
                             severity error;
 
                             if banks(ctrl.currBank).state = ActiveIdle then
-                                banks(ctrl.currBank).state          <= Precharging;
-                                bankCounters(ctrl.currBank).counter := get_delay(Precharging, bank_next_state(Precharging));
+                                banks(ctrl.currBank).state  <= Precharging;
+                                bankCounters(ctrl.currBank) := bank_schedule_transition(Precharging, bank_next_state(Precharging));
+
+                                Log("Bank " & to_string(ctrl.currBank) & " state change scheduled: " & Bank_State_T'image(banks(ctrl.currBank).state) & " --> " & Bank_State_T'image(Precharging), DEBUG);
                             elsif banks(ctrl.currBank).state = ActiveRecharging then
                                 bankCounters(ctrl.currBank).scheduledPrecharge := true;
                             else
@@ -483,8 +448,8 @@ begin
                 wait until rising_edge(clkInternal);
                 if rising_edge(clkInternal) then
                     -- helper variables
-                    bankPtr := to_integer(inputReg.bank);
-                    addrPtr := to_integer(inputReg.addr);
+                    bankPtr := to_safe_natural(inputReg.bank);
+                    addrPtr := to_safe_natural(inputReg.addr);
                     a10Flag := logic_to_bool(inputReg.addr(10));
                     data    := inputReg.data;
 
@@ -509,9 +474,11 @@ begin
                         end if;
                     end if;
 
-                    -- 
+                    -- tMRD = 2 cycles
                     if ctrl.state = AccessingModeReg then
                         ctrl.state <= Idle;
+
+                        Log("Ctrl State Change scheduled: " & Sdram_State_T'image(ctrl.state) & " --> " & Sdram_State_T'image(Idle), DEBUG);
                     end if;
 
                     -- increment burst counter
@@ -561,6 +528,8 @@ begin
                             ctrl.currBank      <= bankPtr;
                             ctrl.autoPrecharge <= a10Flag;
 
+                            Log("Ctrl State Change scheduled: " & Sdram_State_T'image(ctrl.state) & " --> " & Sdram_State_T'image(ReadBurst), DEBUG);
+
                             currCol      := addrPtr;
                             burstCounter := 0;
 
@@ -582,6 +551,8 @@ begin
                             ctrl.currBank      <= bankPtr;
                             ctrl.autoPrecharge <= a10Flag;
 
+                            Log("Ctrl State Change scheduled: " & Sdram_State_T'image(ctrl.state) & " --> " & Sdram_State_T'image(WriteBurst), DEBUG);
+
                             currCol      := addrPtr;
                             burstCounter := 0;
 
@@ -596,6 +567,8 @@ begin
 
                             ctrl.state <= Idle;
 
+                            Log("Ctrl State Change scheduled: " & Sdram_State_T'image(ctrl.state) & " --> " & Sdram_State_T'image(Idle), DEBUG);
+
                             currCol      := 0;
                             burstCounter := 0;
 
@@ -609,6 +582,8 @@ begin
                                 if a10Flag or bankPtr = ctrl.currBank then
                                     -- truncate Read/Write burst without Auto Precharge
                                     ctrl.state <= Idle;
+
+                                    Log("Ctrl State Change scheduled: " & Sdram_State_T'image(ctrl.state) & " --> " & Sdram_State_T'image(Idle), DEBUG);
                                 end if;
                             end if;
 
@@ -627,8 +602,12 @@ begin
                             report "Invalid Mode Register value on data input, cannot Load Mode Register"
                             severity error;
 
+                            Log("Received Load Mode Register command with payload: 0x" & to_hstring(inputReg.data), DEBUG);
+
                             ctrl.state <= AccessingModeReg;
                             modeReg    <= data;
+
+                            Log("Ctrl State Change scheduled: " & Sdram_State_T'image(ctrl.state) & " --> " & Sdram_State_T'image(AccessingModeReg), DEBUG);
 
                         -- Active does not terminate read/write burst
                         -- Refresh handled by bank controller
@@ -714,7 +693,7 @@ begin
                         if inputReg.cmd = Precharge and inputReg.addr(10) = '1' then
                             currState := Refresh;
                             counter   := 2**(ROW_ADDR_WIDTH + 1);
-                        elsif inputReg.cmd /= NoOp or inputReg.cmd /= CmdInhibit then
+                        elsif inputReg.cmd /= NoOp and inputReg.cmd /= CmdInhibit then
                             report "Didn't receive a PrechargeAll command after stable clock & power during initialization"
                             severity error;
                         end if;

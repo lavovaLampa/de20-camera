@@ -37,7 +37,7 @@ entity ccd_model is
 end entity ccd_model;
 
 -- TODO: write assert for rowStart, colStart, rowSize, colSize
-architecture RTL of ccd_model is
+architecture model of ccd_model is
     signal paramsReg : CCD_Params_R := (
         rowStart  => ROW_START_DEFAULT,
         colStart  => COL_START_DEFAULT,
@@ -293,4 +293,4 @@ begin
             );
 
     end block serialConfig;
-end architecture RTL;
+end architecture model;
