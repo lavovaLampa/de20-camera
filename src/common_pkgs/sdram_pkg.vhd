@@ -3,6 +3,9 @@ use ieee.std_logic_1164.all;
 use ieee.numeric_std.all;
 use ieee.math_real.all;
 
+library osvvm;
+context osvvm.OsvvmContext;
+
 package sdram_pkg is
     -- input clk period
     constant CLK_PERIOD : time := 7.5 ns;
@@ -23,6 +26,7 @@ package sdram_pkg is
     subtype Col_Addr_T is unsigned(COL_ADDR_WIDTH - 1 downto 0);
     subtype Bank_Addr_T is unsigned(BANK_ADDR_WIDTH - 1 downto 0);
     subtype Data_T is std_logic_vector(DATA_WIDTH - 1 downto 0);
+    subtype Dqm_T is std_logic_vector(DQM_WIDTH - 1 downto 0);
 
     -- internal types/data ranges
     subtype Row_Ptr_T is natural range 0 to 2**ROW_ADDR_WIDTH - 1;
@@ -58,11 +62,27 @@ package sdram_pkg is
         writeEnableNeg   : std_logic;
     end record Cmd_Aggregate_R;
 
-    type Mem_IO_Aggregate_R is record
+    type Mem_IO_R is record
+        addr         : Addr_T;
+        bankSelect   : Bank_Addr_T;
+        data         : Data_T;
+        clkEnable    : std_logic;
+        cmdAggregate : Cmd_Aggregate_R;
+        -- x16 input/output data mask
+        dqm          : Dqm_T;
+    end record Mem_IO_R;
+
+    type Mem_Data_Aggregate_R is record
         cmd  : Cmd_T;
         addr : Addr_T;
         bank : Bank_Addr_T;
         data : Data_T;
+    end record Mem_Data_Aggregate_R;
+
+    type Mem_IO_Aggregate_R is record
+        cmd  : Cmd_T;
+        addr : Addr_T;
+        bank : Bank_Addr_T;
     end record Mem_IO_Aggregate_R;
 
     -- command timings
@@ -130,9 +150,10 @@ package sdram_pkg is
     -- encode/decode sdram commands (read, write, etc.)
     pure function decode_cmd(chipSelectNeg, rowAddrStrobeNeg, colAddrStrobeNeg, writeEnableNeg : std_logic) return Cmd_T;
     pure function encode_cmd(cmd : Cmd_T) return Cmd_Aggregate_R;
-    -- encode/decode mode register
+    -- encode/decode/validate mode register
     pure function encode_mode_reg(burstLength : Burst_Length_T; burstType : Burst_Type_T; latencyMode : Latency_Mode_T; writeBurstMode : Write_Burst_Mode_T) return Data_T;
     pure function decode_mode_reg(modeReg : Data_T) return Mode_Reg_R;
+    pure function validate_mode_reg(modeReg : Data_T) return boolean;
 
     /** 
      * Return min. number of cycles the ctrl has to wait after requesting specified command.
@@ -142,15 +163,21 @@ package sdram_pkg is
     pure function cmd_delay(cmd : Cmd_T) return natural;
 
     -- cmd i/o interfacing helper functions
+    -- these function handle data, don't forget to also update data register!
+    pure function write(col : Col_Addr_T; bank : Bank_Addr_T; autoPrecharge : boolean) return Mem_IO_Aggregate_R;
+    pure function load_mode_reg(data : Data_T) return Mem_IO_Aggregate_R;
+
+    -- cmd i/o functions w/o data handling
     pure function active(row : Addr_T; bank : Bank_Addr_T) return Mem_IO_Aggregate_R;
     pure function read(col : Col_Addr_T; bank : Bank_Addr_T; autoPrecharge : boolean) return Mem_IO_Aggregate_R;
-    pure function write(col : Col_Addr_T; bank : Bank_Addr_T; autoPrecharge : boolean; data : Data_T) return Mem_IO_Aggregate_R;
     pure function precharge(bank : Bank_Addr_T; allBanks : boolean) return Mem_IO_Aggregate_R;
     pure function burst_terminate return Mem_IO_Aggregate_R;
     pure function refresh return Mem_IO_Aggregate_R;
-    pure function load_mode_reg(data : Data_T) return Mem_IO_Aggregate_R;
     pure function nop return Mem_IO_Aggregate_R;
-    pure function nop(data : Data_T) return Mem_IO_Aggregate_R;
+
+    -- cmd i/o intefacing helper functions
+    pure function pack_io_data(data : Data_T; memIo : Mem_IO_Aggregate_R) return Mem_Data_Aggregate_R;
+    pure function repack_pure_io(memDataIo : Mem_Data_Aggregate_R) return Mem_IO_Aggregate_R;
 
 end package sdram_pkg;
 
@@ -184,62 +211,6 @@ package body sdram_pkg is
     constant tREFCycles    : natural := time_to_cycles(tREF);
 
     -- functions
-    pure function active(row : Addr_T; bank : Bank_Addr_T) return Mem_IO_Aggregate_R is
-    begin
-        return (cmd => Active, bank => bank, addr => row, data => (others => 'Z'));
-    end function active;
-
-    pure function read(col : Col_Addr_T; bank : Bank_Addr_T; autoPrecharge : boolean) return Mem_IO_Aggregate_R is
-        variable tmpAddr : Addr_T := (others => '-');
-    begin
-        tmpAddr(10)                       := '1' when autoPrecharge else '0';
-        tmpAddr(Col_Addr_T'high downto 0) := col;
-
-        return (cmd => Read, bank => bank, addr => tmpAddr, data => (others => 'Z'));
-    end function read;
-
-    pure function write(col : Col_Addr_T; bank : Bank_Addr_T; autoPrecharge : boolean; data : Data_T) return Mem_IO_Aggregate_R is
-        variable tmpAddr : Addr_T := (others => '-');
-    begin
-        tmpAddr(10)                       := '1' when autoPrecharge else '0';
-        tmpAddr(Col_Addr_T'high downto 0) := col;
-
-        return (cmd => Write, bank => bank, addr => tmpAddr, data => data);
-    end function write;
-
-    pure function precharge(bank : Bank_Addr_T; allBanks : boolean) return Mem_IO_Aggregate_R is
-        variable tmpAddr : Addr_T := (others => '-');
-    begin
-        tmpAddr(10) := '1' when allBanks else '0';
-
-        return (cmd => Precharge, bank => bank, addr => tmpAddr, data => (others => 'Z'));
-    end function precharge;
-
-    pure function burst_terminate return Mem_IO_Aggregate_R is
-    begin
-        return (cmd => BurstTerminate, bank => (others => '-'), addr => (others => '-'), data => (others => 'Z'));
-    end function burst_terminate;
-
-    pure function refresh return Mem_IO_Aggregate_R is
-    begin
-        return (cmd => Refresh, bank => (others => '-'), addr => (others => '-'), data => (others => 'Z'));
-    end function refresh;
-
-    pure function load_mode_reg(data : Data_T) return Mem_IO_Aggregate_R is
-    begin
-        return (cmd => LoadModeReg, bank => (others => '-'), addr => (others => '-'), data => data);
-    end function load_mode_reg;
-
-    pure function nop return Mem_IO_Aggregate_R is
-    begin
-        return (cmd => NoOp, bank => (others => '-'), addr => (others => '-'), data => (others => 'Z'));
-    end function nop;
-
-    pure function nop(data : Data_T) return Mem_IO_Aggregate_R is
-    begin
-        return (cmd => noOp, bank => (others => '-'), addr => (others => '-'), data => data);
-    end function nop;
-
     pure function cmd_delay(cmd : Cmd_T) return natural is
     begin
         case cmd is
@@ -432,4 +403,69 @@ package body sdram_pkg is
             writeBurstMode => decode_write_burst_mode(modeReg(9))
         );
     end function decode_mode_reg;
+
+    pure function active(row : Addr_T; bank : Bank_Addr_T) return Mem_IO_Aggregate_R is
+    begin
+        return (cmd => Active, bank => bank, addr => row);
+    end function active;
+
+    pure function read(col : Col_Addr_T; bank : Bank_Addr_T; autoPrecharge : boolean) return Mem_IO_Aggregate_R is
+        variable tmpAddr : Addr_T := (others => '-');
+    begin
+        tmpAddr(10)                       := '1' when autoPrecharge else '0';
+        tmpAddr(Col_Addr_T'high downto 0) := col;
+
+        return (cmd => Read, bank => bank, addr => tmpAddr);
+    end function read;
+
+    pure function write(col : Col_Addr_T; bank : Bank_Addr_T; autoPrecharge : boolean) return Mem_IO_Aggregate_R is
+        variable tmpAddr : Addr_T := (others => '-');
+    begin
+        tmpAddr(10)                       := '1' when autoPrecharge else '0';
+        tmpAddr(Col_Addr_T'high downto 0) := col;
+
+        return (cmd => Write, bank => bank, addr => tmpAddr);
+    end function write;
+
+    pure function precharge(bank : Bank_Addr_T; allBanks : boolean) return Mem_IO_Aggregate_R is
+        variable tmpAddr : Addr_T := (others => '-');
+    begin
+        tmpAddr(10) := '1' when allBanks else '0';
+
+        return (cmd => Precharge, bank => bank, addr => tmpAddr);
+    end function precharge;
+
+    pure function burst_terminate return Mem_IO_Aggregate_R is
+    begin
+        return (cmd => BurstTerminate, bank => (others => '-'), addr => (others => '-'));
+    end function burst_terminate;
+
+    pure function refresh return Mem_IO_Aggregate_R is
+    begin
+        return (cmd => Refresh, bank => (others => '-'), addr => (others => '-'));
+    end function refresh;
+
+    pure function load_mode_reg(data : Data_T) return Mem_IO_Aggregate_R is
+    begin
+        assert validate_mode_reg(data)
+        report "Invalid mode register data specified"
+        severity warning;
+
+        return (cmd => LoadModeReg, bank => (others => '-'), addr => (others => '-'));
+    end function load_mode_reg;
+
+    pure function nop return Mem_IO_Aggregate_R is
+    begin
+        return (cmd => NoOp, bank => (others => '-'), addr => (others => '-'));
+    end function nop;
+
+    pure function pack_io_data(data : Data_T; memIo : Mem_IO_Aggregate_R) return Mem_Data_Aggregate_R is
+    begin
+        return (addr => memIo.addr, bank => memIo.bank, cmd => memIo.cmd, data => data);
+    end function pack_io_data;
+
+    pure function repack_pure_io(memDataIo : Mem_Data_Aggregate_R) return Mem_IO_Aggregate_R is
+    begin
+        return (addr => memDataIo.addr, bank => memDataIo.bank, cmd => memDataIo.cmd);
+    end function repack_pure_io;
 end package body sdram_pkg;

@@ -97,6 +97,7 @@ begin
         wait for 10 * CLK_PERIOD;
         -- Stop the clock and hence terminate the simulation
         TbSimEnded <= '1';
+        wait;
     end process;
 
     outputCheck : process(clkIn, rstAsyncIn)

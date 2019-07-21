@@ -1,67 +1,41 @@
-# where are sources located
-SRC_DIR = src
+WORK_DIR = work
 TB_DIR = tb
-LIB_DIR = $(SRC_DIR)/common_pkgs
-TB_LIB_DIR = $(TB_DIR)/common
+SRC_DIR = src
 
-# list all sources
-LIBS = $(wildcard $(LIB_DIR)/*.vhd)
-LIBS += $(wildcard $(TB_LIB_DIR)/*.vhd)
-FILES = $(wildcard $(SRC_DIR)/*.vhd)
-FILES += $(wildcard $(TB_DIR)/*.vhd)
-FILES += $(LIBS)
+PKG_DIR_SUFFIX = common_pkgs
+MODEL_DIR_SUFFIX = model
 
-# simulator (GHDL) variables
-GHDL_CMD = ghdl
-OUT_NAME = wave_out
-VCD_OUT_NAME = $(OUT_NAME).vcd
-GHW_OUT_NAME = $(OUT_NAME).ghw
-WORKDIR = work
-MAKE_OPTS = --std=08
-ANALYSIS_OPTS = --std=08 
-ELABORATE_OPTS = --std=08
-RUN_OPTS = --std=08 -Wunused -Wothers -Wstatic 
-VCD_OPTS = --vcd=$(WORKDIR)/$(VCD_OUT_NAME)
-GHW_OPTS = --wave=$(WORKDIR)/$(GHW_OUT_NAME)
+GHW_OPTS_SUFFIX = _ghw_opts.txt
 
-# GHDL file/entity mapping file
-GHDL_LIB_INFO = $(WORKDIR)/work-obj08.cf
+COMMON_OPTS = --std=08 --workdir=$(WORK_DIR)
+IMPORT_OPTS = $(COMMON_OPTS)
+MAKE_OPTS = $(COMMON_OPTS) -g
+RUN_OPTS = --wave=$(WORK_DIR)/$<.ghw
 
-# waveform viewer
-VIEW_CMD = gtkwave
+targets = sdram_init_ctrl ccd_ctrl color_kernel i2c_ccd_config i2c_ctrl
+testbenches = $(foreach target, $(targets), $(target)_tb)
+runnables = $(foreach target, $(targets), $(target)_test)
 
-# import sources
-$(GHDL_LIB_INFO) : $(FILES) $(WORKDIR) $(LIBS)
-	$(GHDL_CMD) -i $(MAKE_OPTS) --workdir=$(WORKDIR) $(SRC_DIR)/*.vhd $(TB_DIR)/*.vhd $(LIB_DIR)/*.vhd $(TB_LIB_DIR)/*.vhd
+work-obj08.cf: $(SRC_DIR)/*.vhd $(SRC_DIR)/$(PKG_DIR_SUFFIX)/*.vhd $(TB_DIR)/*.vhd $(TB_DIR)/$(PKG_DIR_SUFFIX)/*.vhd $(TB_DIR)/$(MODEL_DIR_SUFFIX)/*.vhd
+	ghdl -i $(IMPORT_OPTS)  src/*.vhd src/common_pkgs/*.vhd tb/*.vhd tb/common_pkgs/*.vhd tb/model/*.vhd
 
-$(WORKDIR) :
-	mkdir $(WORKDIR)
+$(testbenches): %_tb: work-obj08.cf
+	ghdl -m $(MAKE_OPTS) $@
 
-.PHONY : ccd_ctrl
-ccd_ctrl : $(GHDL_LIB_INFO) $(LIBS) $(TB_DIR)/ccd_ctrl_tb.vhd $(SRC_DIR)/ccd_ctrl.vhd
-	$(GHDL_CMD) -m $(ELABORATE_OPTS) --workdir=$(WORKDIR) ccd_ctrl_tb
-	$(GHDL_CMD) -r $(RUN_OPTS) --workdir=$(WORKDIR) ccd_ctrl_tb $(GHW_OPTS) --read-wave-opt=$(TB_DIR)/ccd_ctrl_tb_ghw_opts.txt
+.PHONY: $(runnables)
+$(runnables): %_test: %_tb
+	./$*_tb $(if $(wildcard $(TB_DIR)/$*_tb$(GHW_OPTS_SUFFIX)), --read-wave-opt=$(TB_DIR)/$*_tb$(GHW_OPTS_SUFFIX)) $(RUN_OPTS)
 
-.PHONY : color_kernel
-color_kernel : $(GHDL_LIB_INFO) $(LIBS) $(TB_DIR)/color_kernel_tb.vhd $(SRC_DIR)/color_kernel.vhd $(SRC_DIR)/pixel_shiftreg.vhd
-	$(GHDL_CMD) -m $(ELABORATE_OPTS) --workdir=$(WORKDIR) color_kernel_tb
-	$(GHDL_CMD) -r $(RUN_OPTS) --workdir=$(WORKDIR) color_kernel_tb $(VCD_OPTS)
+.PHONY: setup_osvvm
+setup_osvvm:
+	/usr/lib/ghdl/vendors/compile-osvvm.sh --src ~/Documents/git/de20-camera/lib/OSVVM-2018.04/ --osvvm
 
-.PHONY : i2c_ctrl
-i2c_ctrl : $(GHDL_LIB_INFO) $(LIBS) $(TB_DIR)/i2c_ctrl_tb.vhd $(SRC_DIR)/i2c_ctrl.vhd
-	$(GHDL_CMD) -m $(ELABORATE_OPTS) --workdir=$(WORKDIR) i2c_ctrl_tb
-	$(GHDL_CMD) -r $(RUN_OPTS) --workdir=$(WORKDIR) i2c_ctrl_tb $(GHW_OPTS)
+.PHONY: clean
+clean: 
+	-rm ./*.o
+	-rm $(testbenches)
+	-rm $(WORK_DIR)/*.o
+	-rm $(WORK_DIR)/work-obj08.cf
+	-rm $(WORK_DIR)/*.ghw
 
-.PHONY : i2c_ccd_config
-i2c_ccd_config : $(GHDL_LIB_INFO) $(LIBS) $(TB_DIR)/i2c_ccd_config_tb.vhd $(SRC_DIR)/i2c_ccd_config.vhd
-	$(GHDL_CMD) -m $(ELABORATE_OPTS) --workdir=$(WORKDIR) i2c_ccd_config_tb
-	$(GHDL_CMD) -r $(RUN_OPTS) --workdir=$(WORKDIR) i2c_ccd_config_tb $(GHW_OPTS)
 
-.PHONY : show-wave
-show-wave : $(WORKDIR)/$(VCD_OUT_NAME)
-	$(VIEW_CMD) $(WORKDIR)/$(VCD_OUT_NAME)
-
-.PHONY : clean
-clean :
-	$(GHDL_CMD) --clean --workdir=$(WORKDIR)
-	rm $(GHDL_LIB_INFO) $(WORKDIR)/wave_out.* $(WORKDIR)/*.o ./*.o
