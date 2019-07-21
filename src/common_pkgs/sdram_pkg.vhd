@@ -3,6 +3,9 @@ use ieee.std_logic_1164.all;
 use ieee.numeric_std.all;
 use ieee.math_real.all;
 
+library osvvm;
+context osvvm.OsvvmContext;
+
 package sdram_pkg is
     -- input clk period
     constant CLK_PERIOD : time := 7.5 ns;
@@ -147,9 +150,10 @@ package sdram_pkg is
     -- encode/decode sdram commands (read, write, etc.)
     pure function decode_cmd(chipSelectNeg, rowAddrStrobeNeg, colAddrStrobeNeg, writeEnableNeg : std_logic) return Cmd_T;
     pure function encode_cmd(cmd : Cmd_T) return Cmd_Aggregate_R;
-    -- encode/decode mode register
+    -- encode/decode/validate mode register
     pure function encode_mode_reg(burstLength : Burst_Length_T; burstType : Burst_Type_T; latencyMode : Latency_Mode_T; writeBurstMode : Write_Burst_Mode_T) return Data_T;
     pure function decode_mode_reg(modeReg : Data_T) return Mode_Reg_R;
+    pure function validate_mode_reg(modeReg : Data_T) return boolean;
 
     /** 
      * Return min. number of cycles the ctrl has to wait after requesting specified command.
