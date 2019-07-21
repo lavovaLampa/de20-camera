@@ -1,6 +1,7 @@
 WORK_DIR = work
 TB_DIR = tb
 SRC_DIR = src
+LIB_DIR = lib
 
 PKG_DIR_SUFFIX = common_pkgs
 MODEL_DIR_SUFFIX = model
@@ -16,7 +17,7 @@ targets = sdram_init_ctrl ccd_ctrl color_kernel i2c_ccd_config i2c_ctrl
 testbenches = $(foreach target, $(targets), $(target)_tb)
 runnables = $(foreach target, $(targets), $(target)_test)
 
-work-obj08.cf: $(SRC_DIR)/*.vhd $(SRC_DIR)/$(PKG_DIR_SUFFIX)/*.vhd $(TB_DIR)/*.vhd $(TB_DIR)/$(PKG_DIR_SUFFIX)/*.vhd $(TB_DIR)/$(MODEL_DIR_SUFFIX)/*.vhd
+work-obj08.cf: $(SRC_DIR)/*.vhd $(SRC_DIR)/$(PKG_DIR_SUFFIX)/*.vhd $(TB_DIR)/*.vhd $(TB_DIR)/$(PKG_DIR_SUFFIX)/*.vhd $(TB_DIR)/$(MODEL_DIR_SUFFIX)/*.vhd osvvm/
 	ghdl -i $(IMPORT_OPTS)  src/*.vhd src/common_pkgs/*.vhd tb/*.vhd tb/common_pkgs/*.vhd tb/model/*.vhd
 
 $(testbenches): %_tb: work-obj08.cf
@@ -26,9 +27,8 @@ $(testbenches): %_tb: work-obj08.cf
 $(runnables): %_test: %_tb
 	./$*_tb $(if $(wildcard $(TB_DIR)/$*_tb$(GHW_OPTS_SUFFIX)), --read-wave-opt=$(TB_DIR)/$*_tb$(GHW_OPTS_SUFFIX)) $(RUN_OPTS)
 
-.PHONY: setup_osvvm
-setup_osvvm:
-	/usr/lib/ghdl/vendors/compile-osvvm.sh --src ~/Documents/git/de20-camera/lib/OSVVM-2018.04/ --osvvm
+osvvm/:
+	./setup_osvvm.fish
 
 .PHONY: clean
 clean: 
@@ -37,5 +37,4 @@ clean:
 	-rm $(WORK_DIR)/*.o
 	-rm $(WORK_DIR)/work-obj08.cf
 	-rm $(WORK_DIR)/*.ghw
-
 
