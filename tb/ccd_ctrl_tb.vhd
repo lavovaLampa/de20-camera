@@ -92,6 +92,7 @@ begin
 
         -- Stop the clock and hence terminate the simulation
         tbSimEnded <= '1';
+        wait;
     end process;
 
     checkProc : process(clkIn, rstAsyncIn)
