@@ -11,17 +11,28 @@ entity sdram_ctrl is
         WRITE_BURST_LEN : natural := 4
     );
     port(
-        clkIn, rstAsyncIn         : in  std_logic;
+        clkIn, rstAsyncIn         : in    std_logic;
         -- ==============================
         -- |    row_addr    | bank_addr |
         -- ==============================
         -- 13              2 1          0
-        addrIn                    : in  Ctrl_Addr_T;
-        cmdIn                     : in  Ctrl_Cmd_T;
-        cmdReadyOut, dataReadyOut : out boolean;
-        dataIn                    : in  Data_T;
-        dataOut                   : out Data_T;
-        clkStableIn               : in  std_logic
+        addrIn                    : in    Ctrl_Addr_T;
+        cmdIn                     : in    Ctrl_Cmd_T;
+        cmdReadyOut, dataReadyOut : out   boolean;
+        dataIn                    : in    Data_T;
+        dataOut                   : out   Data_T;
+        -- init controller I/O
+        memInitialized            : in    boolean;
+        -- SDRAM I/O
+        sdramAddrOut              : out   Addr_T;
+        sdramDataIo               : inout Data_T := (others => 'Z');
+        sdramBankSelectOut        : out   Bank_Addr_T;
+        sdramClkEnableOut         : out   std_logic;
+        sdramChipSelectNegOut     : out   std_logic;
+        sdramRowAddrStrobeNegOut  : out   std_logic;
+        sdramColAddrStrobeNegOut  : out   std_logic;
+        writeEnableNegOut         : out   std_logic;
+        sdramDqmOut               : out   Dqm_T
     );
 end entity sdram_ctrl;
 
@@ -39,14 +50,12 @@ architecture RTL of sdram_ctrl is
     signal nextData : Data_T             := (others => 'Z');
 
     -- sdram signal providers
-    signal memCtrlIo  : Mem_Data_Aggregate_R := pack_io_data(nextData, nextCmd);
-    signal initCtrlIo : Mem_Data_Aggregate_R;
-    signal clkEnable  : std_logic            := '0';
+    signal memCtrlIo : Mem_Data_Aggregate_R := pack_io_data(nextData, nextCmd);
+    signal clkEnable : std_logic            := '0';
 
     -- internal signals
-    signal memInitialized : boolean            := false;
-    signal bankState      : Bank_State_Array_T := (others => (active => false, row => (others => '0')));
-    signal burstState     : Burst_State_R      := (inBurst => false, counter => 0, precharge => false);
+    signal bankState  : Bank_State_Array_T := (others => (active => false, row => (others => '0')));
+    signal burstState : Burst_State_R      := (inBurst => false, counter => 0, precharge => false);
 
     -- debug signals
     signal dbgCurrState                      : Internal_State_T;
@@ -58,11 +67,6 @@ architecture RTL of sdram_ctrl is
     signal dbgReadPrefetch, dbgWritePrefetch : Prefetch_Data_R;
 
 begin
-    -- if initialized let the controller communicate with the sdram
-    with memInitialized select nextMemData <=
-        memCtrlIo when true,
-        initCtrlIo when false;
-
     -- unpack mem i/o signals
     memIo <= (
         addr         => nextMemData.addr,
@@ -73,7 +77,7 @@ begin
         dqm          => (others => '0')
     );
 
-    mainProc : process(clkIn, rstAsyncIn, nextCmd, nextData)
+    mainProc : process(clkIn, rstAsyncIn, nextCmd, nextData, memInitialized)
         impure function all_banks_precharged return boolean is
             variable retval : boolean := true;
         begin
@@ -304,19 +308,4 @@ begin
         dbgScheduledCmd  <= scheduledCmd;
         dbgWaitCounter   <= waitCounter;
     end process mainProc;
-
-    initCtrl : entity work.sdram_init
-        generic map(
-            INIT_DELAY_CYCLES => 1500,
-            MODE_REG          => encode_mode_reg(PAGE_LEN, Sequential, 2, ProgrammedLength)
-        )
-        port map(
-            clkIn        => clkIn,
-            rstAsyncIn   => rstAsyncIn,
-            clkStableIn  => clkStableIn,
-            memIoOut     => initCtrlIo,
-            clkEnableOut => clkEnable,
-            doneOut      => memInitialized
-        );
-
 end architecture RTL;

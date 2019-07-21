@@ -52,7 +52,7 @@ begin
         port map(
             clkIn              => clkIn,
             addrIn             => memIo.addr,
-            dataIn             => memIo.data,
+            dataIo             => memIo.data,
             bankSelectIn       => memIo.bank,
             clkEnableIn        => clkEnable,
             chipSelectNegIn    => encodedCmd.chipSelectNeg,

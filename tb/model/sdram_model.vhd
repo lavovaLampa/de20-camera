@@ -22,7 +22,7 @@ entity sdram_model is
     port(
         clkIn                                : in    std_logic;
         addrIn                               : in    Addr_T;
-        dataIn                               : inout Data_T  := (others => 'Z');
+        dataIo                               : inout Data_T  := (others => 'Z');
         bankSelectIn                         : in    Bank_Addr_T;
         clkEnableIn                          : in    std_logic;
         chipSelectNegIn, rowAddrStrobeNegIn  : in    std_logic;
@@ -75,7 +75,7 @@ begin
                     dqm  => dqmIn,
                     cmd  => currCmd,
                     bank => bankSelectIn,
-                    data => dataIn
+                    data => dataIo
                 );
             end if;
         end process latchProc;
