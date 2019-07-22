@@ -22,17 +22,10 @@ entity sdram_ctrl is
         dataIn                    : in    Data_T;
         dataOut                   : out   Data_T;
         -- init controller I/O
-        memInitialized            : in    boolean;
+        memInitializedIn          : in    boolean;
         -- SDRAM I/O
-        sdramAddrOut              : out   Addr_T;
-        sdramDataIo               : inout Data_T := (others => 'Z');
-        sdramBankSelectOut        : out   Bank_Addr_T;
-        sdramClkEnableOut         : out   std_logic;
-        sdramChipSelectNegOut     : out   std_logic;
-        sdramRowAddrStrobeNegOut  : out   std_logic;
-        sdramColAddrStrobeNegOut  : out   std_logic;
-        writeEnableNegOut         : out   std_logic;
-        sdramDqmOut               : out   Dqm_T
+        sdramOut                  : out   Mem_IO_R;
+        sdramDataIo               : inout Data_T := (others => 'Z')
     );
 end entity sdram_ctrl;
 
@@ -40,18 +33,7 @@ architecture RTL of sdram_ctrl is
     type Internal_State_T is (Idle, BatchWait, Burst);
 
     -- SDRAM I/O
-    signal memIo : Mem_IO_R;
-
-    -- next memory i/o (to prevent contention by init+mem controllers)
-    signal nextMemData : Mem_Data_Aggregate_R;
-
-    -- cmd output of controller
-    signal nextCmd  : Mem_IO_Aggregate_R := nop;
-    signal nextData : Data_T             := (others => 'Z');
-
-    -- sdram signal providers
-    signal memCtrlIo : Mem_Data_Aggregate_R := pack_io_data(nextData, nextCmd);
-    signal clkEnable : std_logic            := '0';
+    signal nextCmd : Mem_IO_Aggregate_R;
 
     -- internal signals
     signal bankState  : Bank_State_Array_T := (others => (active => false, row => (others => '0')));
@@ -65,19 +47,17 @@ architecture RTL of sdram_ctrl is
     signal dbgScheduledCmd                   : Scheduled_Cmd_R;
     signal dbgWaitCounter                    : integer range -2 to 10;
     signal dbgReadPrefetch, dbgWritePrefetch : Prefetch_Data_R;
-
 begin
-    -- unpack mem i/o signals
-    memIo <= (
-        addr         => nextMemData.addr,
-        bankSelect   => nextMemData.bank,
-        data         => nextMemData.data,
-        clkEnable    => clkEnable,
-        cmdAggregate => encode_cmd(nextMemData.cmd),
-        dqm          => (others => '0')
+    -- pack sdram signals
+    sdramOut <= (
+        addr         => nextCmd.addr,
+        bankSelect   => nextCmd.bank,
+        cmdAggregate => encode_cmd(nextCmd.cmd),
+        dqm          => (others => '0'),
+        clkEnable    => '1'
     );
 
-    mainProc : process(clkIn, rstAsyncIn, nextCmd, nextData, memInitialized)
+    mainProc : process(clkIn, rstAsyncIn, memInitializedIn)
         impure function all_banks_precharged return boolean is
             variable retval : boolean := true;
         begin
@@ -123,10 +103,11 @@ begin
         begin
             if isRead then
                 nextCmd            <= read((others => '0'), lastAddr.bank, false);
+                -- FIXME: not final
                 burstState.counter <= 2**COL_ADDR_WIDTH - 1 + tCAS;
             else
                 nextCmd            <= write((others => '0'), lastAddr.bank, false);
-                nextData           <= dataIn;
+                sdramDataIo        <= dataIn;
                 burstState.counter <= 2**COL_ADDR_WIDTH - 1;
             end if;
 
@@ -170,16 +151,8 @@ begin
             end if;
         end procedure schedule_addr_prefetch;
     begin
-        -- pack controller sdram i/o
-        memCtrlIo <= (
-            cmd  => nextCmd.cmd,
-            addr => nextCmd.addr,
-            bank => nextCmd.bank,
-            data => nextData
-        );
-
         -- FIXME: rewrite cmd ready flag handling
-        cmdReadyOut <= currState = Idle and memInitialized;
+        cmdReadyOut <= currState = Idle and memInitializedIn;
 
         if rstAsyncIn = '1' then
             currState     := Idle;
@@ -188,16 +161,16 @@ begin
             writePrefetch := (lastAddr => addr_to_record((others => '0')), cmdCounter => 0, isPrefetched => false);
         elsif rising_edge(clkIn) then
             -- signals only active for one clock
-            nextCmd  <= nop;
-            nextData <= (others => 'Z');
+            nextCmd     <= nop;
+            sdramDataIo <= (others => 'Z');
 
-            if memInitialized then
+            if memInitializedIn then
                 -- burst counter and data handling
                 if burstState.inBurst then
                     if lastCmd = Write then
-                        nextData <= dataIn;
+                        sdramDataIo <= dataIn;
                     elsif lastCmd = Read then
-                        dataOut <= memIo.data;
+                        dataOut <= sdramDataIo;
                     end if;
 
                     if burstState.counter > 0 then

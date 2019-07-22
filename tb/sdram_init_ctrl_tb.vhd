@@ -41,7 +41,7 @@ begin
             clkStableIn  => clkStable,
             memIoOut     => memIo,
             clkEnableOut => clkEnable,
-            doneOut      => initDone
+            memInitializedOut      => initDone
         );
 
     sdramModel : entity work.sdram_model
@@ -61,8 +61,8 @@ begin
             writeEnableNegIn   => encodedCmd.writeEnableNeg,
             dqmIn              => (others => '0'),
             -- debug signals
-            isInitialized      => memInitialized,
-            simEnded           => simEnded
+            isInitializedOut      => memInitialized,
+            simEndedIn           => simEnded
         );
 
     -- Clock generation

@@ -9,11 +9,13 @@ entity sdram_init_ctrl is
         INIT_DELAY_CYCLES : natural                       := 200 us / CLK_PERIOD
     );
     port(
-        clkIn, rstAsyncIn : in  std_logic;
-        clkStableIn       : in  std_logic;
-        memIoOut          : out Mem_Data_Aggregate_R;
-        clkEnableOut      : out std_logic;
-        doneOut           : out boolean := false
+        clkIn, rstAsyncIn : in    std_logic;
+        clkStableIn       : in    std_logic;
+        -- functional outputs
+        memInitializedOut : out   boolean := false;
+        -- SDRAM I/O
+        memOut            : out   Mem_IO_R;
+        memDataIo         : inout Data_T
     );
 end entity sdram_init_ctrl;
 
@@ -23,16 +25,20 @@ architecture rtl of sdram_init_ctrl is
     signal nextData    : Data_T                                      := (others => 'Z');
     signal waitCounter : integer range -1 to INIT_DELAY_CYCLES + 100 := 0;
 
+    signal clkEnable : std_logic := '0';
+
     -- debug signals
     signal dbgInternalState : Internal_State_T;
 begin
-    -- pack mem i/o with data
-    memIoOut <= (
-        cmd  => nextIo.cmd,
-        addr => nextIo.addr,
-        bank => nextIo.bank,
-        data => nextData
+    -- pack mem i/o
+    memOut    <= (
+        cmdAggregate => encode_cmd(nextIo.cmd),
+        addr         => nextIo.addr,
+        bankSelect   => nextIo.bank,
+        clkEnable    => clkEnable,
+        dqm          => (others => '0')
     );
+    memDataIo <= nextData;
 
     initProc : process(clkIn, rstAsyncIn)
         -- reg
@@ -41,20 +47,20 @@ begin
         variable refreshCounter : natural range 0 to 2**(ROW_ADDR_WIDTH + 1) := 2**(ROW_ADDR_WIDTH + 1);
     begin
         if rstAsyncIn = '1' then
-            clkEnableOut <= '0';
-            doneOut      <= false;
+            memInitializedOut <= false;
 
             nextIo      <= nop;
             nextData    <= (others => 'Z');
             waitCounter <= INIT_DELAY_CYCLES;
+            clkEnable   <= '0';
 
             currState      := InitDelay;
             refreshCounter := 2**(ROW_ADDR_WIDTH + 1);
         elsif rising_edge(clkIn) then
             -- by default send nop command
-            clkEnableOut <= '1';
-            nextIo       <= nop;
-            nextData     <= (others => 'Z');
+            clkEnable <= '1';
+            nextIo    <= nop;
+            nextData  <= (others => 'Z');
 
             if clkStableIn then
                 waitCounter <= waitCounter - 1 when currState /= Done;
@@ -94,7 +100,7 @@ begin
                         end if;
 
                     when Done =>
-                        doneOut <= true;
+                        memInitializedOut <= true;
 
                 end case;
             end if;

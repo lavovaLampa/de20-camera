@@ -29,8 +29,8 @@ entity sdram_model is
         colAddrStrobeNegIn, writeEnableNegIn : in    std_logic;
         dqmIn                                : in    std_logic_vector(1 downto 0);
         -- debug signals
-        isInitialized                        : out   boolean := false;
-        simEnded                             : in    boolean
+        isInitializedOut                     : out   boolean := false;
+        simEndedIn                           : in    boolean
     );
 end entity sdram_model;
 
@@ -444,7 +444,7 @@ begin
                 file_close(inputFile);
             end if;
 
-            while not simEnded loop
+            while not simEndedIn loop
                 wait until rising_edge(clkInternal);
                 if rising_edge(clkInternal) then
                     -- helper variables
@@ -623,7 +623,7 @@ begin
                 end if;
             end loop;
 
-            if DUMP_TO_FILE and simEnded then
+            if DUMP_TO_FILE and simEndedIn then
                 report "Dumping (sparse) memory to file, please wait..." severity note;
                 file_open(outputFile, OUTPUT_FILE_NAME, write_mode);
 
@@ -719,7 +719,7 @@ begin
                         end if;
 
                     when Done =>
-                        isInitialized <= true;
+                        isInitializedOut <= true;
 
                 end case;
             end if;

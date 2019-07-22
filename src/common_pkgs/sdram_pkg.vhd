@@ -55,17 +55,17 @@ package sdram_pkg is
         writeBurstMode : Write_Burst_Mode_T;
     end record Mode_Reg_R;
 
+    -- grouped SDRAM command encoding signals
     type Cmd_Aggregate_R is record
         chipSelectNeg    : std_logic;
         rowAddrStrobeNeg : std_logic;
         colAddrStrobeNeg : std_logic;
         writeEnableNeg   : std_logic;
     end record Cmd_Aggregate_R;
-
+    
     type Mem_IO_R is record
         addr         : Addr_T;
         bankSelect   : Bank_Addr_T;
-        data         : Data_T;
         clkEnable    : std_logic;
         cmdAggregate : Cmd_Aggregate_R;
         -- x16 input/output data mask

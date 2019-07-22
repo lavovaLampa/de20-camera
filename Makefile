@@ -13,7 +13,7 @@ IMPORT_OPTS = $(COMMON_OPTS)
 MAKE_OPTS = $(COMMON_OPTS) -g
 RUN_OPTS = --wave=$(WORK_DIR)/$<.ghw
 
-targets = sdram_init_ctrl ccd_ctrl color_kernel i2c_ccd_config i2c_ctrl
+targets = sdram_init_ctrl ccd_ctrl color_kernel i2c_ccd_config i2c_ctrl sdram_ctrl
 testbenches = $(foreach target, $(targets), $(target)_tb)
 runnables = $(foreach target, $(targets), $(target)_test)
 
