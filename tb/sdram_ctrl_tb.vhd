@@ -8,6 +8,9 @@ use ieee.numeric_std.all;
 use work.sdram_pkg.all;
 use work.sdram_ctrl_pkg.all;
 
+library osvvm;
+context osvvm.OsvvmContext;
+
 entity sdram_ctrl_tb is
     constant CLK_PERIOD : time := 7.5 ns;
 
@@ -21,12 +24,17 @@ architecture tb of sdram_ctrl_tb is
     signal clkIn      : std_logic;
     signal rstAsyncIn : std_logic;
 
-    -- ctrl I/O
-    signal addrIn       : Ctrl_Addr_T;
-    signal cmdIn        : Ctrl_Cmd_T;
+    -- FIXME: how to generate clock? Should I use some phase shift?
+    -- clock generation signals
+    signal clkStable : std_logic;
+
+    -- ctrl IN
+    signal addrIn       : Ctrl_Addr_T := (others => '0');
+    signal cmdIn        : Ctrl_Cmd_T  := NoOp;
+    signal dataIn       : Data_T      := (others => '0');
+    -- ctrl OUT
     signal cmdReadyOut  : boolean;
     signal dataReadyOut : boolean;
-    signal dataIn       : Data_T;
     signal dataOut      : Data_T;
 
     -- SDRAM I/O
@@ -41,6 +49,7 @@ architecture tb of sdram_ctrl_tb is
     -- testbench signals
     signal tbClk      : std_logic := '0';
     signal tbSimEnded : std_logic := '0';
+    signal stimuliEnd : boolean   := false;
 
 begin
     dut : entity work.sdram_ctrl_top
@@ -60,7 +69,8 @@ begin
             dataOut      => dataOut,
             sdramClkOut  => sdramClkOut,
             sdramDataIo  => sdramDataIo,
-            sdramOut     => sdramOut
+            sdramOut     => sdramOut,
+            clkStableIn  => clkStable
         );
 
     sdramModel : entity work.sdram_model
@@ -93,39 +103,61 @@ begin
     stimuli : process
     begin
         -- EDIT Adapt initialization as needed
-        addrIn <= (others => '0');
-        cmdIn  <= NoOp;
-        dataIn <= (others => '0');
+        clkStable <= '0';
 
         -- Reset generation
         -- EDIT: Check that rstAsyncIn is really your reset signal
         rstAsyncIn <= '1';
         wait for 10 ns;
         rstAsyncIn <= '0';
-        wait for 10 ns;
+        wait for 100 ns;
+        clkStable  <= '1';
 
-        wait until isInitialized;
+        wait until cmdReadyOut;
+        AlertIf(not isInitialized, "Controller is ready for command even though the SDRAM is not initialized properly", ERROR);
+
+        SetLogEnable(DEBUG, true);
+        SetLogEnable(INFO, true);
+
+        wait until stimuliEnd;
 
         -- Stop the clock and hence terminate the simulation
         tbSimEnded <= '1';
         wait;
     end process;
 
-    readProc : process(clkIn, rstAsyncIn)
+    testProc : process(clkIn, rstAsyncIn, cmdReadyOut)
+        variable counter : natural     := 20;
+        variable addrOut : Ctrl_Addr_T := (others => '0');
     begin
-        if rstAsyncIn = '1' then
-
-        elsif rising_edge(clkIn) then
-
+        cmdIn  <= NoOp;
+        addrIn <= addrOut;
+        if cmdReadyOut then
+            if counter > 15 then
+                cmdIn <= Refresh;
+            elsif counter > 10 then
+                cmdIn <= Read;
+            end if;
         end if;
-    end process readProc;
 
-    writeProc : process(clkIn, rstAsyncIn)
-    begin
         if rstAsyncIn = '1' then
+            dataIn <= (others => '0');
 
+            stimuliEnd <= false;
+
+            counter := 20;
         elsif rising_edge(clkIn) then
+            if cmdReadyOut then
+                if counter > 10 then
+                    counter := counter - 1;
+                else
+                    stimuliEnd <= true;
+                end if;
 
+                if counter > 10 and counter <= 15 then
+                    addrOut := addrOut + 1;
+                end if;
+            end if;
         end if;
-    end process writeProc;
+    end process testProc;
 end tb;

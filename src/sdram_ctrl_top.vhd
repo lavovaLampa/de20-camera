@@ -25,13 +25,13 @@ entity sdram_ctrl_top is
         -- SDRAM I/O
         sdramClkOut               : out   std_logic;
         sdramDataIo               : inout Data_T;
-        sdramOut                  : out   Mem_IO_R
+        sdramOut                  : out   Mem_IO_R;
+        clkStableIn               : in    std_logic
     );
 end entity sdram_ctrl_top;
 
 architecture RTL of sdram_ctrl_top is
-    signal clkStable      : std_logic := '0';
-    signal memInitialized : boolean   := false;
+    signal memInitialized : boolean := false;
 
     -- init ctrl SDRAM I/O
     signal initMemOut    : Mem_IO_R;
@@ -56,9 +56,11 @@ begin
 
     burstCtrl : entity work.sdram_ctrl
         generic map(
-            ROW_MAX         => ROW_MAX,
-            READ_BURST_LEN  => READ_BURST_LEN,
-            WRITE_BURST_LEN => WRITE_BURST_LEN
+            ROW_MAX   => ROW_MAX,
+            BURST_LEN => (
+                Read  => READ_BURST_LEN,
+                Write => WRITE_BURST_LEN
+            )
         )
         port map(
             clkIn            => clkIn,
@@ -81,7 +83,7 @@ begin
         port map(
             clkIn             => clkIn,
             rstAsyncIn        => rstAsyncIn,
-            clkStableIn       => clkStable,
+            clkStableIn       => clkStableIn,
             memInitializedOut => memInitialized,
             memOut            => initMemOut,
             memDataIo         => initMemDataIo

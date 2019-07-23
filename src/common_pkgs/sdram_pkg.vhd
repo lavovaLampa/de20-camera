@@ -62,7 +62,7 @@ package sdram_pkg is
         colAddrStrobeNeg : std_logic;
         writeEnableNeg   : std_logic;
     end record Cmd_Aggregate_R;
-    
+
     type Mem_IO_R is record
         addr         : Addr_T;
         bankSelect   : Bank_Addr_T;

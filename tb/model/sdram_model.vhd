@@ -32,10 +32,11 @@ entity sdram_model is
         isInitializedOut                     : out   boolean := false;
         simEndedIn                           : in    boolean
     );
+    constant SDRAM_ALERT_ID : AlertLogIDType := GetAlertLogID("SDRAM", ALERTLOG_BASE_ID);
 end entity sdram_model;
 
 architecture model of sdram_model is
-    -- mode register (register)
+    -- mode register (reg)
     signal modeReg : std_logic_vector(DATA_WIDTH - 1 downto 0) := encode_mode_reg(1, Sequential, 2, ProgrammedLength);
 
     -- decoded current command on input (wire) (non-latched)
@@ -48,11 +49,13 @@ architecture model of sdram_model is
     signal writeBurstMode : Write_Burst_Mode_T := ProgrammedLength;
 
     -- internal signals (reg)
-    signal clkInternal : std_logic := '0';
+    signal clkInternal     : std_logic           := '0';
+    signal dataOutPipeline : Data_Out_Pipeline_T := (others => (others => 'Z'));
 
     -- input data latch (register)
     signal inputReg : Input_Latch_R;
 begin
+    dataIo <= dataOutPipeline(0);
 
     decodeBlock : block
         signal clkEnabled : std_logic := '0';
@@ -96,7 +99,6 @@ begin
     end block decodeBlock;
 
     ctrlBlock : block
-        type Data_Out_Pipeline_T is array (0 to 9) of Data_T;
 
         -- TODO: is the upper counter limit OK?
         type Bank_State_Helper_R is record
@@ -117,9 +119,8 @@ begin
         end function bank_schedule_transition;
 
         -- ctrl/banks state representation (reg)
-        signal banks           : Bank_Array_T        := (others => (state => Idle, row => 0));
-        signal ctrl            : Ctrl_State_R;
-        signal dataOutPipeline : Data_Out_Pipeline_T := (others => (others => 'Z'));
+        signal banks : Bank_Array_T := (others => (state => Idle, row => 0));
+        signal ctrl  : Ctrl_State_R;
 
         -- debug signals
         signal bankCountersDbg : Bank_Helpers_T;
@@ -152,14 +153,14 @@ begin
                         banks(i).state          <= Precharging;
                         bankCounters(i).counter := bank_transition_delay(Precharging, bank_next_state(Precharging));
 
-                        Log("Bank " & to_string(i) & " state change scheduled: " & Bank_State_T'image(banks(i).state) & " --> " & Bank_State_T'image(Precharging), DEBUG);
+                        Log(SDRAM_ALERT_ID, "Bank " & to_string(i) & " state change scheduled: " & Bank_State_T'image(banks(i).state) & " --> " & Bank_State_T'image(Precharging), DEBUG);
                     end if;
 
                     if bankCounters(i).counting then
                         if bankCounters(i).counter = 0 then
                             banks(i).state <= bank_next_state(banks(i).state);
 
-                            Log("Bank " & to_string(i) & " state change scheduled: " & Bank_State_T'image(banks(i).state) & " --> " & Bank_State_T'image(bank_next_state(banks(i).state)), DEBUG);
+                            Log(SDRAM_ALERT_ID, "Bank " & to_string(i) & " state change scheduled: " & Bank_State_T'image(banks(i).state) & " --> " & Bank_State_T'image(bank_next_state(banks(i).state)), DEBUG);
 
                             -- if bank is Active schedule transition from ActiveIdle to ActiveRecharging
                             if banks(i).state = Activating then
@@ -176,11 +177,6 @@ begin
                 -- decrement Active counter
                 if activeCounter > 0 then
                     activeCounter := activeCounter - 1;
-                end if;
-
-                -- debug log
-                if inputReg.cmd /= NoOp and inputReg.cmd /= CmdInhibit then
-                    Log("Received command: " & Cmd_T'image(inputReg.cmd), INFO);
                 end if;
 
                 -- handle current command on input latch
@@ -208,7 +204,7 @@ begin
                         bankCounters(bankPtr) := bank_schedule_transition(Activating, bank_next_state(Activating));
                         activeCounter         := tRRDCycles;
 
-                        Log("Bank " & to_string(bankPtr) & " state change scheduled: " & Bank_State_T'image(banks(bankPtr).state) & " --> " & Bank_State_T'image(Activating), DEBUG);
+                        Log(SDRAM_ALERT_ID, "Bank " & to_string(bankPtr) & " state change scheduled: " & Bank_State_T'image(banks(bankPtr).state) & " --> " & Bank_State_T'image(Activating), DEBUG);
 
                     -- close activated row (if idle does nothing)
                     -- a10 flags selects whether to Precharge all banks (a10 HIGH -> Precharge All)
@@ -240,7 +236,7 @@ begin
                                     banks(i).state  <= Precharging;
                                     bankCounters(i) := bank_schedule_transition(Precharging, bank_next_state(Precharging));
 
-                                    Log("Bank " & to_string(i) & " state change scheduled: " & Bank_State_T'image(banks(i).state) & " --> " & Bank_State_T'image(Precharging), DEBUG);
+                                    Log(SDRAM_ALERT_ID, "Bank " & to_string(i) & " state change scheduled: " & Bank_State_T'image(banks(i).state) & " --> " & Bank_State_T'image(Precharging), DEBUG);
                                 end if;
                             end loop;
                         else            -- precharge only selected bank
@@ -264,7 +260,7 @@ begin
                                 banks(bankPtr).state  <= Precharging;
                                 bankCounters(bankPtr) := bank_schedule_transition(Precharging, bank_next_state(Precharging));
 
-                                Log("Bank " & to_string(bankPtr) & " state change scheduled: " & Bank_State_T'image(banks(bankPtr).state) & " --> " & Bank_State_T'image(Precharging), DEBUG);
+                                Log(SDRAM_ALERT_ID, "Bank " & to_string(bankPtr) & " state change scheduled: " & Bank_State_T'image(banks(bankPtr).state) & " --> " & Bank_State_T'image(Precharging), DEBUG);
                             end if;
                         end if;
 
@@ -283,7 +279,7 @@ begin
                             banks(i).state  <= Refreshing;
                             bankCounters(i) := bank_schedule_transition(Refreshing, bank_next_state(Refreshing));
 
-                            Log("Bank " & to_string(i) & " state change scheduled: " & Bank_State_T'image(banks(i).state) & " --> " & Bank_State_T'image(Refreshing), DEBUG);
+                            Log(SDRAM_ALERT_ID, "Bank " & to_string(i) & " state change scheduled: " & Bank_State_T'image(banks(i).state) & " --> " & Bank_State_T'image(Refreshing), DEBUG);
                         end loop;
                         null;
 
@@ -303,7 +299,7 @@ begin
                                 banks(ctrl.currBank).state  <= Precharging;
                                 bankCounters(ctrl.currBank) := bank_schedule_transition(Precharging, bank_next_state(Precharging));
 
-                                Log("Bank " & to_string(ctrl.currBank) & " state change scheduled: " & Bank_State_T'image(banks(ctrl.currBank).state) & " --> " & Bank_State_T'image(Precharging), DEBUG);
+                                Log(SDRAM_ALERT_ID, "Bank " & to_string(ctrl.currBank) & " state change scheduled: " & Bank_State_T'image(banks(ctrl.currBank).state) & " --> " & Bank_State_T'image(Precharging), DEBUG);
                             elsif banks(ctrl.currBank).state = ActiveRecharging then
                                 bankCounters(ctrl.currBank).scheduledPrecharge := true;
                             else
@@ -384,8 +380,8 @@ begin
             variable tmpCol                                   : bit_vector(DATA_WIDTH - 1 downto 0);
 
             -- state variables
-            variable currCol      : Col_Ptr_T                                := 0;
-            variable burstCounter : natural range 0 to 2**COL_ADDR_WIDTH - 1 := 0;
+            variable currCol      : Col_Ptr_T                            := 0;
+            variable burstCounter : natural range 0 to 2**COL_ADDR_WIDTH := 0;
 
             impure function get_curr_col return Col_Ptr_T is
                 constant COL_END : natural := 2**COL_ADDR_WIDTH - 1;
@@ -478,8 +474,12 @@ begin
                     if ctrl.state = AccessingModeReg then
                         ctrl.state <= Idle;
 
-                        Log("Ctrl State Change scheduled: " & Sdram_State_T'image(ctrl.state) & " --> " & Sdram_State_T'image(Idle), DEBUG);
+                        Log(SDRAM_ALERT_ID, "Ctrl State Change scheduled: " & Sdram_State_T'image(ctrl.state) & " --> " & Sdram_State_T'image(Idle), DEBUG);
                     end if;
+
+                    -- increment dataOutPipeline shift register
+                    dataOutPipeline(0 to 8) <= dataOutPipeline(1 to 9);
+                    dataOutPipeline(9)      <= (others => 'Z');
 
                     -- increment burst counter
                     if ctrl.state = WriteBurst or ctrl.state = ReadBurst then
@@ -501,6 +501,11 @@ begin
                                 null;
                             end if;
                         end if;
+                    end if;
+
+                    -- debug log
+                    if inputReg.cmd /= NoOp and inputReg.cmd /= CmdInhibit then
+                        Log(SDRAM_ALERT_ID, "Received command: " & Cmd_T'image(inputReg.cmd), INFO);
                     end if;
 
                     case inputReg.cmd is
@@ -528,7 +533,7 @@ begin
                             ctrl.currBank      <= bankPtr;
                             ctrl.autoPrecharge <= a10Flag;
 
-                            Log("Ctrl State Change scheduled: " & Sdram_State_T'image(ctrl.state) & " --> " & Sdram_State_T'image(ReadBurst), DEBUG);
+                            Log(SDRAM_ALERT_ID, "Ctrl State Change scheduled: " & Sdram_State_T'image(ctrl.state) & " --> " & Sdram_State_T'image(ReadBurst), INFO);
 
                             currCol      := addrPtr;
                             burstCounter := 0;
@@ -551,7 +556,7 @@ begin
                             ctrl.currBank      <= bankPtr;
                             ctrl.autoPrecharge <= a10Flag;
 
-                            Log("Ctrl State Change scheduled: " & Sdram_State_T'image(ctrl.state) & " --> " & Sdram_State_T'image(WriteBurst), DEBUG);
+                            Log(SDRAM_ALERT_ID, "Ctrl State Change scheduled: " & Sdram_State_T'image(ctrl.state) & " --> " & Sdram_State_T'image(WriteBurst), INFO);
 
                             currCol      := addrPtr;
                             burstCounter := 0;
@@ -567,7 +572,7 @@ begin
 
                             ctrl.state <= Idle;
 
-                            Log("Ctrl State Change scheduled: " & Sdram_State_T'image(ctrl.state) & " --> " & Sdram_State_T'image(Idle), DEBUG);
+                            Log(SDRAM_ALERT_ID, "Ctrl State Change scheduled: " & Sdram_State_T'image(ctrl.state) & " --> " & Sdram_State_T'image(Idle), INFO);
 
                             currCol      := 0;
                             burstCounter := 0;
@@ -583,7 +588,7 @@ begin
                                     -- truncate Read/Write burst without Auto Precharge
                                     ctrl.state <= Idle;
 
-                                    Log("Ctrl State Change scheduled: " & Sdram_State_T'image(ctrl.state) & " --> " & Sdram_State_T'image(Idle), DEBUG);
+                                    Log(SDRAM_ALERT_ID, "Ctrl State Change scheduled: " & Sdram_State_T'image(ctrl.state) & " --> " & Sdram_State_T'image(Idle), INFO);
                                 end if;
                             end if;
 
@@ -602,12 +607,12 @@ begin
                             report "Invalid Mode Register value on data input, cannot Load Mode Register"
                             severity error;
 
-                            Log("Received Load Mode Register command with payload: 0x" & to_hstring(inputReg.data), DEBUG);
+                            Log(SDRAM_ALERT_ID, "Received Load Mode Register command with payload: 0x" & to_hstring(inputReg.data), INFO);
 
                             ctrl.state <= AccessingModeReg;
                             modeReg    <= data;
 
-                            Log("Ctrl State Change scheduled: " & Sdram_State_T'image(ctrl.state) & " --> " & Sdram_State_T'image(AccessingModeReg), DEBUG);
+                            Log(SDRAM_ALERT_ID, "Ctrl State Change scheduled: " & Sdram_State_T'image(ctrl.state) & " --> " & Sdram_State_T'image(AccessingModeReg), INFO);
 
                         -- Active does not terminate read/write burst
                         -- Refresh handled by bank controller
@@ -658,7 +663,7 @@ begin
             variable refreshCounter   : natural range 0 to 2**ROW_ADDR_WIDTH := 2**ROW_ADDR_WIDTH;
         begin
             assert NOW - lastRefreshCycle < tREF
-            report "Didn't refresh all rows in time!"
+            report "Didn't refresh all the rows in time!"
             severity error;
 
             if rising_edge(clkInternal) then

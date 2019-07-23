@@ -9,6 +9,14 @@ package sdram_ctrl_pkg is
     type Ctrl_Cmd_T is (NoOp, Read, Write, Refresh);
     subtype Ctrl_Addr_T is unsigned(ADDR_WIDTH - 1 downto 0);
 
+    subtype Op_T is Ctrl_Cmd_T range Read to Write;
+    type Burst_Len_T is array (Op_T) of natural;
+    type Next_Op_Map_T is array (Op_T) of Op_T;
+    constant next_op : Next_Op_Map_T := (
+        Read  => Write,
+        Write => Read
+    );
+
     type Ctrl_Addr_R is record
         row  : Addr_T;
         bank : Bank_Addr_T;
@@ -20,12 +28,12 @@ package sdram_ctrl_pkg is
     end record Bank_State_R;
     type Bank_State_Array_T is array (0 to BANK_COUNT - 1) of Bank_State_R;
 
-    type Scheduled_Cmd_R is record
-        cmd        : Cmd_T;
-        addr       : Ctrl_Addr_R;
-        startBurst : boolean;
-        done       : boolean;
-    end record Scheduled_Cmd_R;
+    type Scheduler_R is record
+        cmd         : Cmd_T;
+        addr        : Ctrl_Addr_R;
+        startBurst  : boolean;
+        isScheduled : boolean;
+    end record Scheduler_R;
 
     type Burst_State_R is record
         inBurst   : boolean;
@@ -38,6 +46,8 @@ package sdram_ctrl_pkg is
         cmdCounter   : natural range 0 to 7;
         isPrefetched : boolean;
     end record Prefetch_Data_R;
+
+    type Prefetch_Array_T is array (Op_T) of Prefetch_Data_R;
 
     pure function next_row_addr(addrRecord : Ctrl_Addr_R; rowMax : natural) return Ctrl_Addr_R;
     pure function addr_to_record(addr : Ctrl_Addr_T) return Ctrl_Addr_R;
@@ -67,5 +77,4 @@ package body sdram_ctrl_pkg is
             return addr_to_record((others => '0'));
         end if;
     end function next_row_addr;
-
 end package body sdram_ctrl_pkg;

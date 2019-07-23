@@ -1,14 +1,21 @@
 library ieee;
 use ieee.std_logic_1164.all;
 use ieee.numeric_std.all;
+
 use work.sdram_ctrl_pkg.all;
 use work.sdram_pkg.all;
+use work.sdram_model_pkg.to_safe_natural;
+
+library osvvm;
+context osvvm.OsvvmContext;
 
 entity sdram_ctrl is
     generic(
-        ROW_MAX         : natural := 1800;
-        READ_BURST_LEN  : natural := 5;
-        WRITE_BURST_LEN : natural := 4
+        ROW_MAX   : natural     := 1800;
+        BURST_LEN : Burst_Len_T := (
+            Read  => 5,
+            Write => 4
+        )
     );
     port(
         clkIn, rstAsyncIn         : in    std_logic;
@@ -27,6 +34,7 @@ entity sdram_ctrl is
         sdramOut                  : out   Mem_IO_R;
         sdramDataIo               : inout Data_T := (others => 'Z')
     );
+    constant CTRL_ALERT_ID : AlertLogIDType := GetAlertLogID("CTRL MEM", ALERTLOG_BASE_ID);
 end entity sdram_ctrl;
 
 architecture RTL of sdram_ctrl is
@@ -35,18 +43,18 @@ architecture RTL of sdram_ctrl is
     -- SDRAM I/O
     signal nextCmd : Mem_IO_Aggregate_R;
 
-    -- internal signals
-    signal bankState  : Bank_State_Array_T := (others => (active => false, row => (others => '0')));
-    signal burstState : Burst_State_R      := (inBurst => false, counter => 0, precharge => false);
+    -- internal registers
+    signal bankState   : Bank_State_Array_T    := (others => (active => false, row => (others => '0')));
+    signal burstState  : Burst_State_R         := (inBurst => false, counter => 0, precharge => false);
+    signal currState   : Internal_State_T      := Idle;
+    signal scheduler   : Scheduler_R           := (cmd => NoOp, addr => addr_to_record((others => '0')), startBurst => false, isScheduled => false);
+    signal waitCounter : natural range 0 to 10 := 0;
 
     -- debug signals
-    signal dbgCurrState                      : Internal_State_T;
-    signal dbgLastAddr                       : Ctrl_Addr_R;
-    signal dbgLastCmd                        : Ctrl_Cmd_T;
-    signal dbgBankPtr                        : Bank_Ptr_T;
-    signal dbgScheduledCmd                   : Scheduled_Cmd_R;
-    signal dbgWaitCounter                    : integer range -2 to 10;
-    signal dbgReadPrefetch, dbgWritePrefetch : Prefetch_Data_R;
+    signal dbgLastAddr     : Ctrl_Addr_R;
+    signal dbgLastCmd      : Ctrl_Cmd_T;
+    signal dbgBankPtr      : Bank_Ptr_T;
+    signal dbgPrefetchData : Prefetch_Array_T;
 begin
     -- pack sdram signals
     sdramOut <= (
@@ -57,7 +65,7 @@ begin
         clkEnable    => '1'
     );
 
-    mainProc : process(clkIn, rstAsyncIn, memInitializedIn)
+    mainProc : process(clkIn, rstAsyncIn)
         impure function all_banks_precharged return boolean is
             variable retval : boolean := true;
         begin
@@ -68,13 +76,12 @@ begin
         end function all_banks_precharged;
 
         -- reg
-        variable currState                   : Internal_State_T       := Idle;
-        variable lastAddr                    : Ctrl_Addr_R            := addr_to_record((others => '0'));
-        variable lastCmd                     : Ctrl_Cmd_T             := NoOp;
-        variable bankPtr                     : Bank_Ptr_T             := 0;
-        variable scheduledCmd                : Scheduled_Cmd_R        := (cmd => NoOp, addr => addr_to_record((others => '0')), startBurst => false, done => true);
-        variable waitCounter                 : integer range -2 to 10 := 10;
-        variable readPrefetch, writePrefetch : Prefetch_Data_R        := (lastAddr => addr_to_record((others => '0')), cmdCounter => 0, isPrefetched => false);
+        variable currAddr     : Ctrl_Addr_R      := addr_to_record((others => '0'));
+        variable currCmd      : Ctrl_Cmd_T       := NoOp;
+        variable bankPtr      : Bank_Ptr_T       := 0;
+        --        variable scheduledCmd : Scheduler_R            := (cmd => NoOp, addr => addr_to_record((others => '0')), startBurst => false, isScheduled => false);
+        --        variable waitCounter  : integer range -2 to 10 := 10;
+        variable prefetchData : Prefetch_Array_T := (others => (lastAddr => addr_to_record((others => '0')), cmdCounter => 0, isPrefetched => false));
 
         -- scheduled bank activation (e.g. if wrong row is active, first Precharge, then Activate)
         procedure schedule_bank_activation(addr : in Ctrl_Addr_R; startBurst : in boolean) is
@@ -82,51 +89,50 @@ begin
         begin
             if not bankState(currBank).active then
                 nextCmd     <= active(addr.row, addr.bank);
-                waitCounter := cmd_delay(Active);
+                waitCounter <= cmd_delay(Active) - 1;
             else
-                nextCmd      <= precharge(addr.bank, false);
-                waitCounter  := cmd_delay(Precharge);
+                nextCmd     <= precharge(addr.bank, false);
+                waitCounter <= cmd_delay(Precharge) - 1;
                 -- schedule row activation after we precharge the old one
-                scheduledCmd := (
-                    cmd        => Active,
-                    addr       => addr,
-                    startBurst => startBurst,
-                    done       => false
+                scheduler   <= (
+                    cmd         => Active,
+                    addr        => addr,
+                    startBurst  => startBurst,
+                    isScheduled => true
                 );
             end if;
 
-            scheduledCmd.startBurst := startBurst;
+            scheduler.startBurst <= startBurst;
         end procedure schedule_bank_activation;
 
         -- start a burst and setup burst state
-        procedure schedule_burst_start(isRead : in boolean) is
+        procedure burst_start(burstType : in Op_T) is
         begin
-            if isRead then
-                nextCmd            <= read((others => '0'), lastAddr.bank, false);
-                -- FIXME: not final
-                burstState.counter <= 2**COL_ADDR_WIDTH - 1 + tCAS;
-            else
-                nextCmd            <= write((others => '0'), lastAddr.bank, false);
-                sdramDataIo        <= dataIn;
-                burstState.counter <= 2**COL_ADDR_WIDTH - 1;
-            end if;
+            case burstType is
+                when Read =>
+                    nextCmd            <= read((others => '0'), currAddr.bank, false);
+                    -- FIXME: not final
+                    burstState.counter <= 2**COL_ADDR_WIDTH - 1 + tCAS;
+
+                when Write =>
+                    nextCmd            <= write((others => '0'), currAddr.bank, false);
+                    sdramDataIo        <= dataIn;
+                    burstState.counter <= 2**COL_ADDR_WIDTH - 1;
+            end case;
 
             burstState.inBurst   <= true;
             burstState.precharge <= false;
-        end procedure schedule_burst_start;
+        end procedure burst_start;
 
         -- return whether we should try to early activate this address' bank/row
-        impure function should_prefetch_addr(thisAddr, otherAddr : in Ctrl_Addr_R; isRead : boolean) return boolean is
+        impure function should_prefetch_addr(thisAddr, otherAddr : in Ctrl_Addr_R; thisOp : Op_T) return boolean is
             variable currBank       : Bank_Ptr_T := to_integer(thisAddr.bank);
             variable shouldPrefetch : boolean    := true;
+            variable otherOp        : Op_T       := next_op(thisOp);
         begin
             if thisAddr.bank = otherAddr.bank then
                 if thisAddr.row /= otherAddr.row then
-                    if isRead then
-                        shouldPrefetch := (lastCmd = Read and readPrefetch.cmdCounter < READ_BURST_LEN) or (lastCmd = Write and writePrefetch.cmdCounter >= WRITE_BURST_LEN);
-                    else
-                        shouldPrefetch := (lastCmd = Read and readPrefetch.cmdCounter >= READ_BURST_LEN) or (lastCmd = Write and writePrefetch.cmdCounter < WRITE_BURST_LEN);
-                    end if;
+                    shouldPrefetch := (currCmd = thisOp and prefetchData(thisOp).cmdCounter < BURST_LEN(thisOp)) or (currCmd = otherOp and prefetchData(otherOp).cmdCounter >= BURST_LEN(otherOp));
                 end if;
             end if;
 
@@ -134,14 +140,14 @@ begin
         end function should_prefetch_addr;
 
         -- try to queue row/bank activation based on next predicted address
-        procedure schedule_addr_prefetch(thisAddr, otherAddr : in Ctrl_Addr_R; isRead : boolean) is
-            variable shouldPrefetchAddr : boolean := should_prefetch_addr(thisAddr, otherAddr, isRead);
+        procedure schedule_addr_prefetch(thisAddr, otherAddr : in Ctrl_Addr_R; thisOp : Op_T) is
+            variable shouldPrefetchAddr : boolean := should_prefetch_addr(thisAddr, otherAddr, thisOp);
         begin
             -- if next predicted bank is the same as the one being bursted
             -- either keep it open or precharge it at the end of the burst
             if shouldPrefetchAddr then
-                if thisAddr.bank = lastAddr.bank then
-                    if thisAddr.row /= lastAddr.row then
+                if thisAddr.bank = currAddr.bank then
+                    if thisAddr.row /= currAddr.row then
                         burstState.precharge <= true;
                     end if;
                 -- else just keep the row open after burst end
@@ -150,26 +156,50 @@ begin
                 end if;
             end if;
         end procedure schedule_addr_prefetch;
-    begin
-        -- FIXME: rewrite cmd ready flag handling
-        cmdReadyOut <= currState = Idle and memInitializedIn;
 
+        procedure update_bank_state(cmd : in Cmd_T; rowAddr : in Addr_T; bankAddr : in Bank_Addr_T) is
+            variable currBank : Bank_Ptr_T := to_safe_natural(bankAddr);
+        begin
+            case cmd is
+                when Active =>
+                    bankState(currBank) <= (
+                        active => true,
+                        row    => rowAddr
+                    );
+
+                when Precharge =>
+                    if rowAddr(10) = '1' then
+                        for i in Bank_Ptr_T loop
+                            bankState(i).active <= false;
+                        end loop;
+                    else
+                        bankState(currBank).active <= false;
+                    end if;
+
+                when others =>
+                    null;
+            end case;
+        end procedure update_bank_state;
+    begin
         if rstAsyncIn = '1' then
-            currState     := Idle;
-            burstState    <= (inBurst => false, counter => 0, precharge => false);
-            readPrefetch  := (lastAddr => addr_to_record((others => '0')), cmdCounter => 0, isPrefetched => false);
-            writePrefetch := (lastAddr => addr_to_record((others => '0')), cmdCounter => 0, isPrefetched => false);
+            burstState <= (inBurst => false, counter => 0, precharge => false);
+            currState  <= Idle;
+
+            prefetchData := (others => (lastAddr => addr_to_record((others => '0')), cmdCounter => 0, isPrefetched => false));
         elsif rising_edge(clkIn) then
             -- signals only active for one clock
             nextCmd     <= nop;
             sdramDataIo <= (others => 'Z');
 
+            -- update bank_state according to currently scheduled sdram cmd batch
+            update_bank_state(nextCmd.cmd, nextCmd.addr, nextCmd.bank);
+
             if memInitializedIn then
                 -- burst counter and data handling
                 if burstState.inBurst then
-                    if lastCmd = Write then
+                    if currCmd = Write then
                         sdramDataIo <= dataIn;
-                    elsif lastCmd = Read then
+                    elsif currCmd = Read then
                         dataOut <= sdramDataIo;
                     end if;
 
@@ -183,44 +213,40 @@ begin
                 -- sdram cmd & state handling
                 case currState is
                     when Idle =>
-                        lastAddr := addr_to_record(addrIn);
-                        lastCmd  := cmdIn;
-                        bankPtr  := to_integer(lastAddr.bank);
+                        currAddr := addr_to_record(addrIn);
+                        currCmd  := cmdIn;
+                        bankPtr  := to_integer(currAddr.bank);
+
+                        if cmdIn /= NoOp then
+                            Log(CTRL_ALERT_ID, "Received command: " & to_string(cmdIn), INFO);
+                        end if;
 
                         case cmdIn is
                             when Read | Write =>
-                                if bankState(bankPtr).row = lastAddr.row and bankState(bankPtr).active then
-                                    schedule_burst_start(lastCmd = Read);
-                                    currState := Burst;
+                                if bankState(bankPtr).row = currAddr.row and bankState(bankPtr).active then
+                                    burst_start(cmdIn);
+                                    currState <= Burst;
                                 else
-                                    schedule_bank_activation(lastAddr, true);
-                                    currState := BatchWait;
+                                    schedule_bank_activation(currAddr, true);
+                                    currState <= BatchWait;
                                 end if;
 
-                                if cmdIn = Read then
-                                    readPrefetch             := (
-                                        lastAddr     => lastAddr,
-                                        cmdCounter   => readPrefetch.cmdCounter + 1,
-                                        isPrefetched => false
-                                    );
-                                    writePrefetch.cmdCounter := 0;
-                                else
-                                    writePrefetch           := (
-                                        lastAddr     => lastAddr,
-                                        cmdCounter   => writePrefetch.cmdCounter + 1,
-                                        isPrefetched => false
-                                    );
-                                    readPrefetch.cmdCounter := 0;
-                                end if;
+                                prefetchData(cmdIn)                     := (
+                                    lastAddr     => currAddr,
+                                    cmdCounter   => prefetchData(cmdIn).cmdCounter + 1,
+                                    isPrefetched => false
+                                );
+                                prefetchData(next_op(cmdIn)).cmdCounter := 0;
 
                             when Refresh =>
-                                currState := BatchWait;
+                                currState <= BatchWait;
+
                                 if all_banks_precharged then
                                     nextCmd     <= refresh;
-                                    waitCounter := cmd_delay(Refresh);
+                                    waitCounter <= cmd_delay(Refresh) - 1;
                                 else
                                     nextCmd     <= precharge((others => '-'), true);
-                                    waitCounter := cmd_delay(Precharge);
+                                    waitCounter <= cmd_delay(Precharge) - 1;
                                 end if;
 
                             when NoOp =>
@@ -229,56 +255,83 @@ begin
 
                     when BatchWait =>
                         if waitCounter <= 0 then
-                            if scheduledCmd.done then
-                                if scheduledCmd.startBurst or burstState.inBurst then
-                                    currState := Burst;
-                                else
-                                    currState := Idle;
-                                end if;
-
-                                if scheduledCmd.startBurst then
-                                    schedule_burst_start(lastCmd = Read);
-                                end if;
-                            else
-                                waitCounter       := cmd_delay(scheduledCmd.cmd) - 1;
-                                scheduledCmd.done := true;
-                                case scheduledCmd.cmd is
-                                    when Active    => nextCmd <= active(scheduledCmd.addr.row, scheduledCmd.addr.bank);
-                                    when Precharge => nextCmd <= precharge(scheduledCmd.addr.bank, false);
+                            if scheduler.isScheduled then
+                                waitCounter           <= cmd_delay(scheduler.cmd) - 1;
+                                scheduler.isScheduled <= false;
+                                case scheduler.cmd is
+                                    when Active    => nextCmd <= active(scheduler.addr.row, scheduler.addr.bank);
+                                    when Precharge => nextCmd <= precharge(scheduler.addr.bank, false);
                                     when Refresh   => nextCmd <= refresh;
                                     when others =>
                                         report "Unsupported command"
                                         severity error;
                                 end case;
+                            else
+                                if scheduler.startBurst then
+                                    scheduler.startBurst <= false;
+                                    burst_start(currCmd);
+
+                                    currState <= Burst;
+                                elsif burstState.inBurst then
+                                    currState <= Burst;
+                                else
+                                    currState <= Idle;
+                                end if;
                             end if;
                         else
-                            waitCounter := waitCounter - 1;
+                            waitCounter <= waitCounter - 1;
                         end if;
 
                     when Burst =>
-                        if not readPrefetch.isPrefetched then
-                            readPrefetch.isPrefetched := true;
-                            schedule_addr_prefetch(next_row_addr(readPrefetch.lastAddr, ROW_MAX), next_row_addr(writePrefetch.lastAddr, ROW_MAX), true);
-                            currState                 := BatchWait;
-                        elsif not writePrefetch.isPrefetched then
-                            writePrefetch.isPrefetched := true;
-                            schedule_addr_prefetch(next_row_addr(writePrefetch.lastAddr, ROW_MAX), next_row_addr(readPrefetch.lastAddr, ROW_MAX), false);
-                            currState                  := BatchWait;
+                        if not prefetchData(Read).isPrefetched then
+                            prefetchData(Read).isPrefetched := true;
+                            schedule_addr_prefetch(next_row_addr(prefetchData(Read).lastAddr, ROW_MAX), next_row_addr(prefetchData(Write).lastAddr, ROW_MAX), Read);
+                            currState                       <= BatchWait;
+                        elsif not prefetchData(Write).isPrefetched then
+                            prefetchData(Write).isPrefetched := true;
+                            schedule_addr_prefetch(next_row_addr(prefetchData(Write).lastAddr, ROW_MAX), next_row_addr(prefetchData(Read).lastAddr, ROW_MAX), Write);
+                            currState                        <= BatchWait;
                         elsif burstState.counter = 0 then
-                            currState := Idle;
+                            currState <= Idle;
                         end if;
                 end case;
             end if;
         end if;
 
         -- debug signals
-        dbgBankPtr       <= bankPtr;
-        dbgCurrState     <= currState;
-        dbgLastAddr      <= lastAddr;
-        dbgLastCmd       <= lastCmd;
-        dbgReadPrefetch  <= readPrefetch;
-        dbgWritePrefetch <= writePrefetch;
-        dbgScheduledCmd  <= scheduledCmd;
-        dbgWaitCounter   <= waitCounter;
+        dbgBankPtr      <= bankPtr;
+        dbgLastAddr     <= currAddr;
+        dbgLastCmd      <= currCmd;
+        dbgPrefetchData <= prefetchData;
     end process mainProc;
+
+    readyFlagProc : process(clkIn, rstAsyncIn)
+    begin
+        if rstAsyncIn = '1' then
+            cmdReadyOut <= false;
+        elsif rising_edge(clkIn) then
+            if memInitializedIn then
+                case currState is
+                    when Idle =>
+                        case cmdIn is
+                            when NoOp =>
+                                cmdReadyOut <= true;
+
+                            when Read | Write | Refresh =>
+                                cmdReadyOut <= false;
+                        end case;
+
+                    when BatchWait =>
+                        if waitCounter <= 0 and not scheduler.isScheduled and not (scheduler.startBurst or burstState.inBurst) then
+                            cmdReadyOut <= true;
+                        end if;
+
+                    when Burst =>
+                        if burstState.counter <= 0 then
+                            cmdReadyOut <= true;
+                        end if;
+                end case;
+            end if;
+        end if;
+    end process readyFlagProc;
 end architecture RTL;

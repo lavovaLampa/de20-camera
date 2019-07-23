@@ -15,12 +15,11 @@ architecture tb of sdram_init_ctrl_tb is
     -- sdram_init_ctrl entity i/o signals
     signal clkIn, rstAsync : std_logic;
     signal clkStable       : std_logic;
-    signal memIo           : Mem_Data_Aggregate_R;
-    signal clkEnable       : std_logic;
+    signal memIo           : Mem_IO_R;
+    signal memData         : Data_T;
     signal initDone        : boolean;
 
     -- sdram model entity i/o signals
-    signal encodedCmd     : Cmd_Aggregate_R;
     signal memInitialized : boolean;
     signal simEnded       : boolean := false;
 
@@ -29,19 +28,17 @@ architecture tb of sdram_init_ctrl_tb is
     signal tbSimEnded : std_logic := '0';
 
 begin
-    encodedCmd <= encode_cmd(memIo.cmd);
-
     initCtrl : entity work.sdram_init_ctrl
         generic map(
             MODE_REG => MODE_REG
         )
         port map(
-            clkIn        => clkIn,
-            rstAsyncIn   => rstAsync,
-            clkStableIn  => clkStable,
-            memIoOut     => memIo,
-            clkEnableOut => clkEnable,
-            memInitializedOut      => initDone
+            clkIn             => clkIn,
+            rstAsyncIn        => rstAsync,
+            clkStableIn       => clkStable,
+            memInitializedOut => initDone,
+            memOut            => memIo,
+            memDataIo         => memData
         );
 
     sdramModel : entity work.sdram_model
@@ -52,17 +49,17 @@ begin
         port map(
             clkIn              => clkIn,
             addrIn             => memIo.addr,
-            dataIo             => memIo.data,
-            bankSelectIn       => memIo.bank,
-            clkEnableIn        => clkEnable,
-            chipSelectNegIn    => encodedCmd.chipSelectNeg,
-            rowAddrStrobeNegIn => encodedCmd.rowAddrStrobeNeg,
-            colAddrStrobeNegIn => encodedCmd.colAddrStrobeNeg,
-            writeEnableNegIn   => encodedCmd.writeEnableNeg,
-            dqmIn              => (others => '0'),
+            bankSelectIn       => memIo.bankSelect,
+            clkEnableIn        => memIo.clkEnable,
+            chipSelectNegIn    => memIo.cmdAggregate.chipSelectNeg,
+            rowAddrStrobeNegIn => memIo.cmdAggregate.rowAddrStrobeNeg,
+            colAddrStrobeNegIn => memIo.cmdAggregate.colAddrStrobeNeg,
+            writeEnableNegIn   => memIo.cmdAggregate.writeEnableNeg,
+            dqmIn              => memIo.dqm,
+            dataIo             => memData,
             -- debug signals
-            isInitializedOut      => memInitialized,
-            simEndedIn           => simEnded
+            isInitializedOut   => memInitialized,
+            simEndedIn         => simEnded
         );
 
     -- Clock generation
@@ -73,7 +70,7 @@ begin
 
     stimuli : process
     begin
---        SetLogEnable(DEBUG, true);
+        SetLogEnable(DEBUG, true);
         SetLogEnable(INFO, true);
 
         -- EDIT Adapt initialization as needed
@@ -94,7 +91,7 @@ begin
         wait until rising_edge(clkIn);
 
         assert memInitialized
-        report "Memory doesn't report successfull initialization after init controller ends"
+        report "Memory didn't report successfull initialization after init controller is done"
         severity error;
 
         -- Stop the clock and hence terminate the simulation

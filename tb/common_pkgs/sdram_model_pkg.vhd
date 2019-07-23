@@ -26,6 +26,7 @@ package sdram_model_pkg is
     end record Input_Latch_R;
 
     subtype Burst_Length_Range_T is natural range 1 to 2**COL_ADDR_WIDTH - 1;
+    type Data_Out_Pipeline_T is array (0 to 9) of Data_T;
 
     pure function logic_to_bool(val : std_logic) return boolean;
     pure function bank_next_state(currState : Bank_State_T) return Bank_State_T;
