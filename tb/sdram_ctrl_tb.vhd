@@ -15,7 +15,7 @@ entity sdram_ctrl_tb is
     constant CLK_PERIOD : time := 7.5 ns;
 
     constant ROW_MAX         : natural := 1400;
-    constant READ_BURST_LEN  : natural := 4;
+    constant READ_BURST_LEN  : natural := 5;
     constant WRITE_BURST_LEN : natural := 4;
 end sdram_ctrl_tb;
 
@@ -134,8 +134,12 @@ begin
         addrIn <= addrOut;
         if cmdReadyOut then
             if counter > 15 then
-                cmdIn <= Refresh;
+                cmdIn <= Write;
             elsif counter > 10 then
+                cmdIn <= Read;
+            elsif counter > 5 then
+                cmdIn <= Write;
+            else
                 cmdIn <= Read;
             end if;
         end if;
@@ -146,16 +150,21 @@ begin
             stimuliEnd <= false;
 
             counter := 20;
+            addrOut := (others => '0');
         elsif rising_edge(clkIn) then
             if cmdReadyOut then
-                if counter > 10 then
+                if counter > 0 then
                     counter := counter - 1;
                 else
                     stimuliEnd <= true;
                 end if;
 
-                if counter > 10 and counter <= 15 then
+                if counter > 0 then
                     addrOut := addrOut + 1;
+                end if;
+
+                if counter mod 5 = 0 then
+                    addrOut := (others => '0');
                 end if;
             end if;
         end if;

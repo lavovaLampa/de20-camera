@@ -124,6 +124,7 @@ begin
 
         -- debug signals
         signal bankCountersDbg : Bank_Helpers_T;
+        signal burstCounterDbg : natural;
 
     begin
         bankCtrl : process(clkInternal)
@@ -338,6 +339,8 @@ begin
 
             procedure write_mem(bank : in Bank_Ptr_T; row : in Row_Ptr_T; col : in Col_Ptr_T; data : in Data_T; dqm : in std_logic_vector(1 downto 0)) is
             begin
+                --                Log(SDRAM_ALERT_ID, "Writing to Bank: " & to_string(bank) & ", Row: " & to_string(row) & ", Col: " & to_string(col) & ", Dqm: " & to_bstring(dqm) & ", Data: " & to_hstring(data), DEBUG);
+
                 -- if data = all zeroes, we don't have to do nothing, that's the default state of mem
                 if data /= (data'range => '0') and dqm /= (dqm'range => '1') then
                     init_mem(bank, row);
@@ -354,6 +357,8 @@ begin
             impure function read_mem(bank : in Bank_Ptr_T; row : in Row_Ptr_T; col : in Col_Ptr_T; dqm : in std_logic_vector(1 downto 0)) return Data_T is
                 variable tmpData : Data_T := (others => '0');
             begin
+                --                Log(SDRAM_ALERT_ID, "Reading from Bank: " & to_string(bank) & ", Row: " & to_string(row) & ", Col: " & to_string(col) & ", Dqm: " & to_bstring(dqm), DEBUG);
+
                 if bankData(bank)(row) = NULL then
                     tmpData := (others => '0');
                 else
@@ -443,6 +448,9 @@ begin
             while not simEndedIn loop
                 wait until rising_edge(clkInternal);
                 if rising_edge(clkInternal) then
+                    -- debug signals
+                    burstCounterDbg <= burstCounter;
+
                     -- helper variables
                     bankPtr := to_safe_natural(inputReg.bank);
                     addrPtr := to_safe_natural(inputReg.addr);
@@ -456,6 +464,10 @@ begin
                         isPrechargingAll := isPrechargingAll and banks(i).state = Precharging;
                         isRefreshing     := isRefreshing and banks(i).state = Refreshing;
                     end loop;
+
+                    -- increment dataOutPipeline shift register
+                    dataOutPipeline(0 to 8) <= dataOutPipeline(1 to 9);
+                    dataOutPipeline(9)      <= (others => 'Z');
 
                     -- TODO: implement single location Write option + Auto Precharge + tRDL
                     -- TODO: might be best to re-architecture
@@ -477,16 +489,12 @@ begin
                         Log(SDRAM_ALERT_ID, "Ctrl State Change scheduled: " & Sdram_State_T'image(ctrl.state) & " --> " & Sdram_State_T'image(Idle), DEBUG);
                     end if;
 
-                    -- increment dataOutPipeline shift register
-                    dataOutPipeline(0 to 8) <= dataOutPipeline(1 to 9);
-                    dataOutPipeline(9)      <= (others => 'Z');
-
                     -- increment burst counter
                     if ctrl.state = WriteBurst or ctrl.state = ReadBurst then
                         -- if write burst is disabled, only write to one location
                         if ctrl.state = WriteBurst and writeBurstMode = SingleLocation then
                             ctrl.state <= Idle;
-                        elsif burstCounter = burstLength then
+                        elsif burstCounter = burstLength - 1 then
                             -- FullPage burst mode wraps around (only ends after user cmd)
                             if burstLength = PAGE_LEN then
                                 burstCounter := 0;
@@ -535,8 +543,12 @@ begin
 
                             Log(SDRAM_ALERT_ID, "Ctrl State Change scheduled: " & Sdram_State_T'image(ctrl.state) & " --> " & Sdram_State_T'image(ReadBurst), INFO);
 
+                            -- setup burst counter
                             currCol      := addrPtr;
                             burstCounter := 0;
+
+                            -- immediately output read data
+                            dataOutPipeline(latencyMode - 2) <= read_mem(bankPtr, banks(bankPtr).row, get_curr_col, inputReg.dqm);
 
                         when Write =>
                             assert ctrl.state /= AccessingModeReg
@@ -560,6 +572,9 @@ begin
 
                             currCol      := addrPtr;
                             burstCounter := 0;
+
+                            -- immediately write input data
+                            write_mem(bankPtr, banks(bankPtr).row, get_curr_col, inputReg.data, inputReg.dqm);
 
                         when BurstTerminate =>
                             assert ctrl.state = WriteBurst or ctrl.state = ReadBurst

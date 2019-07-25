@@ -8,6 +8,7 @@ package sdram_ctrl_pkg is
 
     type Ctrl_Cmd_T is (NoOp, Read, Write, Refresh);
     subtype Ctrl_Addr_T is unsigned(ADDR_WIDTH - 1 downto 0);
+    subtype Burst_Counter_Range_T is integer range -tCAS to 2**COL_ADDR_WIDTH;
 
     subtype Op_T is Ctrl_Cmd_T range Read to Write;
     type Burst_Len_T is array (Op_T) of natural;
@@ -37,8 +38,9 @@ package sdram_ctrl_pkg is
 
     type Burst_State_R is record
         inBurst   : boolean;
-        counter   : natural range 0 to 2**COL_ADDR_WIDTH + tCAS;
+        counter   : Burst_Counter_Range_T;
         precharge : boolean;
+        burstType : Op_T;
     end record Burst_State_R;
 
     type Prefetch_Data_R is record
