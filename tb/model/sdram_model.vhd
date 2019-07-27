@@ -49,8 +49,9 @@ architecture model of sdram_model is
     signal writeBurstMode : Write_Burst_Mode_T := ProgrammedLength;
 
     -- internal signals (reg)
-    signal clkInternal     : std_logic           := '0';
-    signal dataOutPipeline : Data_Out_Pipeline_T := (others => (others => 'Z'));
+    signal clkInternal     : std_logic       := '0';
+    signal dataOutPipeline : Data_Pipeline_T := (others => (others => 'Z'));
+    signal dataInPipeline  : Data_Pipeline_T := (others => (others => 'Z'));
 
     -- input data latch (register)
     signal inputReg : Input_Latch_R;

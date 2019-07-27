@@ -8,7 +8,7 @@ context osvvm.OsvvmContext;
 
 package sdram_pkg is
     -- input clk period
-    constant CLK_PERIOD : time := 7.5 ns;
+    constant CLK_PERIOD : time := 10 ns;
 
     -- sdram port widths
     constant BANK_ADDR_WIDTH : natural := 2;
@@ -38,7 +38,7 @@ package sdram_pkg is
     type Sdram_State_T is (Idle, ReadBurst, WriteBurst, AccessingModeReg);
 
     -- SDRAM commands
-    type Cmd_T is (CmdInhibit, NoOp, Active, Read, Write, BurstTerminate, Precharge, Refresh, LoadModeReg);
+    type Cmd_T is (CmdInhibit, NoOp, Active, Read, Write, Precharge, Refresh, BurstTerminate, LoadModeReg);
     -- Mode register burst types
     type Burst_Type_T is (Interleaved, Sequential);
     -- Mode register burst length
@@ -87,7 +87,7 @@ package sdram_pkg is
 
     -- command timings
     -- TODO: do i need this timing?
-    constant tARFC   : time := 60 ns;
+    constant tARFC   : time := 60 ns;   -- one Auto Refresh cycle time [shortest refresh strobe (Refresh -> Refresh)] (in some SDRAMs tARFC = tRC)
     constant tRC     : time := 60 ns;   -- row cycle (ref to ref / activate to activate) [shortest row access strobe (Idle -> Access -> Idle)]
     constant tRASmin : time := 42 ns;   -- row address strobe (activate to precharge) [shortest row access time (capacitors take time to recover)]
     constant tRASmax : time := 100 us;  -- row active hold time [longest time row can be held active]
@@ -97,7 +97,7 @@ package sdram_pkg is
     constant tDPL    : time := 2 * CLK_PERIOD; -- input data to Precharge command delay (also defined as tWR)
     constant tDAL    : time := (2 * CLK_PERIOD) + tRP; -- input data to Active/Refresh command delay (during Auto Precharge)
     constant tXSR    : time := 60 ns;   -- exit to Self Refresh to Active
-    constant tREF    : time := 64 ms;   -- Refresh cycle time (all rows) [4096 for current SDRAM]
+    constant tREF    : time := 64 ms;   -- max. Refresh cycle time (all rows) [4096 rows for current SDRAM]
 
     -- command-related timings defined in clock cycles
     -- tDAL : natural := 5;
@@ -146,6 +146,7 @@ package sdram_pkg is
     constant tDALCycles    : natural;   -- input data to Active/Refresh command delay (during Auto Precharge)
     constant tXSRCycles    : natural;   -- exit to Self Refresh to Active
     constant tREFCycles    : natural;   -- Refresh cycle time (all rows) [4096 for current SDRAM]
+    constant tARFCCycles   : natural;   -- 
 
     -- encode/decode sdram commands (read, write, etc.)
     pure function decode_cmd(chipSelectNeg, rowAddrStrobeNeg, colAddrStrobeNeg, writeEnableNeg : std_logic) return Cmd_T;
@@ -209,6 +210,7 @@ package body sdram_pkg is
     constant tDALCycles    : natural := time_to_cycles(tDAL);
     constant tXSRCycles    : natural := time_to_cycles(tXSR);
     constant tREFCycles    : natural := time_to_cycles(tREF);
+    constant tARFCCycles   : natural := time_to_cycles(tARFC);
 
     -- functions
     pure function cmd_delay(cmd : Cmd_T) return natural is
@@ -217,7 +219,7 @@ package body sdram_pkg is
             when Active                                     => return tRCDCycles;
             when Read                                       => return tCAS;
             when Precharge                                  => return tRPCycles;
-            when Refresh                                    => return tRCCycles;
+            when Refresh                                    => return tARFCCycles;
             when LoadModeReg                                => return tMRD;
             when CmdInhibit | NoOp | Write | BurstTerminate => return 1;
         end case;

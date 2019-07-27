@@ -12,7 +12,7 @@ library osvvm;
 context osvvm.OsvvmContext;
 
 entity sdram_ctrl_tb is
-    constant CLK_PERIOD : time := 7.5 ns;
+    constant CLK_PERIOD : time := work.sdram_pkg.CLK_PERIOD;
 
     constant ROW_MAX         : natural := 1400;
     constant READ_BURST_LEN  : natural := 5;

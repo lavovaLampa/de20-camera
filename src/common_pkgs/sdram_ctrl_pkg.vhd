@@ -7,6 +7,7 @@ package sdram_ctrl_pkg is
     constant ADDR_WIDTH : natural := ROW_ADDR_WIDTH + BANK_ADDR_WIDTH;
 
     type Ctrl_Cmd_T is (NoOp, Read, Write, Refresh);
+    subtype Ctrl_Executable_Cmd_T is Ctrl_Cmd_T range Read to Refresh;
     subtype Ctrl_Addr_T is unsigned(ADDR_WIDTH - 1 downto 0);
     subtype Burst_Counter_Range_T is integer range -tCAS to 2**COL_ADDR_WIDTH;
 
@@ -29,18 +30,11 @@ package sdram_ctrl_pkg is
     end record Bank_State_R;
     type Bank_State_Array_T is array (0 to BANK_COUNT - 1) of Bank_State_R;
 
-    type Scheduler_R is record
-        cmd         : Cmd_T;
-        addr        : Ctrl_Addr_R;
-        startBurst  : boolean;
-        isScheduled : boolean;
-    end record Scheduler_R;
-
     type Burst_State_R is record
-        inBurst   : boolean;
-        counter   : Burst_Counter_Range_T;
-        precharge : boolean;
-        burstType : Op_T;
+        inBurst         : boolean;
+        counter         : Burst_Counter_Range_T;
+        burstType       : Op_T;
+        interleavedRead : boolean;
     end record Burst_State_R;
 
     type Prefetch_Data_R is record
@@ -49,10 +43,20 @@ package sdram_ctrl_pkg is
         isPrefetched : boolean;
     end record Prefetch_Data_R;
 
+    type Tmp_Cmd_T is (Read, Write, Refresh, Active, Precharge, PrechargeAll);
+    type Cmd_Plan_Array_T is array (0 to 3) of Tmp_Cmd_T;
+    type Execution_Plan_R is record
+        addr            : Ctrl_Addr_R;
+        cmdPlan         : Cmd_Plan_Array_T;
+        cmdPtr          : integer range -1 to 3;
+        waitForBurstEnd : boolean;
+    end record Execution_Plan_R;
+
     type Prefetch_Array_T is array (Op_T) of Prefetch_Data_R;
 
     pure function next_row_addr(addrRecord : Ctrl_Addr_R; rowMax : natural) return Ctrl_Addr_R;
     pure function addr_to_record(addr : Ctrl_Addr_T) return Ctrl_Addr_R;
+    pure function cmd_to_op(cmd : Ctrl_Executable_Cmd_T) return Tmp_Cmd_T;
 end package sdram_ctrl_pkg;
 
 package body sdram_ctrl_pkg is
@@ -79,4 +83,13 @@ package body sdram_ctrl_pkg is
             return addr_to_record((others => '0'));
         end if;
     end function next_row_addr;
+
+    pure function cmd_to_op(cmd : Ctrl_Executable_Cmd_T) return Tmp_Cmd_T is
+    begin
+        case cmd is
+            when Read    => return Read;
+            when Write   => return Write;
+            when Refresh => return Refresh;
+        end case;
+    end function cmd_to_op;
 end package body sdram_ctrl_pkg;

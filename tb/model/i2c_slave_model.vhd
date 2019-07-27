@@ -9,18 +9,22 @@ entity i2c_slave_model is
     );
     port(
         testClkIn                             : in    std_logic;
-        sClkIn, rstAsyncIn                    : in    std_logic;
+        rstAsyncIn                            : in    std_logic;
+        -- i2c i/o
+        sClkIn                                : in    std_logic;
         dataReceivedOut                       : out   boolean   := false;
         sDataIO                               : inout std_logic := 'Z';
+        -- test signals
         recvDevAddrOut, recvDataAddrOut       : out   I2C_Addr;
         recvDataOut                           : out   I2C_Data;
         expectedDevAddrIn, expectedDataAddrIn : in    I2C_Addr;
         expectedDataIn                        : in    I2C_Data
     );
-    type Slave_State is (Receive, Acknowledge, IgnoreStop);
 end entity i2c_slave_model;
 
 architecture model of i2c_slave_model is
+    type Slave_State is (Receive, Acknowledge, IgnoreStop);
+
     signal testDataAggregate          : I2C_Aggregate;
     signal startReceived, endReceived : boolean := false;
     signal doAck, dataDone            : boolean := false;
