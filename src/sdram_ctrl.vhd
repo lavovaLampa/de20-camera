@@ -70,9 +70,12 @@ begin
         -- reg
         variable currAddr, lastAddr : Ctrl_Addr_R      := addr_to_record((others => '0'));
         variable currCmd            : Ctrl_Cmd_T       := NoOp;
-        variable bankPtr            : Bank_Ptr_T       := 0;
         variable prefetchData       : Prefetch_Array_T := (others => (lastAddr => addr_to_record((others => '0')), cmdCounter => 0, isPrefetched => false));
         variable prechargeBurst     : boolean          := false;
+
+        -- helpers (think of these variables as aliases)
+        variable bankPtr     : Bank_Ptr_T := 0;
+        variable currPlanCmd : Executable_Op_T;
 
         -- HELPER FUNCTIONS
 
@@ -86,8 +89,15 @@ begin
             return retval;
         end function all_banks_precharged;
 
+        procedure reset_prefetch_state is
+        begin
+            for i in Burst_Op_T loop
+                prefetchData(i).isPrefetched := false;
+            end loop;
+        end procedure reset_prefetch_state;
+
         -- start a burst and setup burst state
-        procedure burst_start(burstType : in Op_T) is
+        procedure burst_start(burstType : in Burst_Op_T) is
             variable interleavedRead : boolean := burstType = Read and (burstState.inBurst and burstState.burstType = Read and burstState.counter = 0);
         begin
             case burstType is
@@ -108,40 +118,11 @@ begin
             prechargeBurst := false;
         end procedure burst_start;
 
-        procedure schedule_bank_activation(addr : in Ctrl_Addr_R) is
-            variable cmdBuilder      : Cmd_Plan_Array_T      := (others => Precharge);
-            variable currBank        : Bank_Ptr_T            := to_integer(addr.bank);
-            variable lastCmdPtr      : integer range -1 to 1 := -1;
-            variable shouldPrecharge : boolean               := bankState(currBank).active and bankState(currBank).row /= addr.row;
-            variable shouldActivate  : boolean               := not bankState(currBank).active or bankState(currBank).row /= addr.row;
-        begin
-            -- default values
-            currState   <= ExecutePlan;
-            waitCounter <= 0;
-
-            if shouldActivate then
-                cmdBuilder(0) := Active;
-                lastCmdPtr    := lastCmdPtr + 1;
-            end if;
-
-            if shouldPrecharge then
-                cmdBuilder(1) := Precharge;
-                lastCmdPtr    := lastCmdPtr + 1;
-            end if;
-
-            currPlan <= (
-                addr            => addr,
-                cmdPlan         => cmdBuilder,
-                cmdPtr          => lastCmdPtr,
-                waitForBurstEnd => false
-            );
-        end procedure schedule_bank_activation;
-
         -- return whether we should try to early activate this address' bank/row
-        impure function should_prefetch_addr(thisAddr, otherAddr : in Ctrl_Addr_R; thisOp : Op_T) return boolean is
+        impure function should_prefetch_addr(thisAddr, otherAddr : in Ctrl_Addr_R; thisOp : Burst_Op_T) return boolean is
             variable currBank       : Bank_Ptr_T := to_integer(thisAddr.bank);
             variable shouldPrefetch : boolean    := true;
-            variable otherOp        : Op_T       := next_op(thisOp);
+            variable otherOp        : Burst_Op_T := next_op(thisOp);
         begin
             if thisAddr.bank = otherAddr.bank then
                 if thisAddr.row /= otherAddr.row then
@@ -157,25 +138,7 @@ begin
             return shouldPrefetch and not (bankState(currBank).active and bankState(currBank).row = thisAddr.row);
         end function should_prefetch_addr;
 
-        -- try to queue row/bank activation based on next predicted address
-        procedure schedule_addr_prefetch(thisAddr, otherAddr : in Ctrl_Addr_R; thisOp : Op_T) is
-            variable shouldPrefetchAddr : boolean := should_prefetch_addr(thisAddr, otherAddr, thisOp);
-        begin
-            -- if next predicted bank is the same as the one being bursted
-            -- either keep it open or precharge it at the end of the burst
-            if shouldPrefetchAddr then
-                if thisAddr.bank = currAddr.bank then
-                    if thisAddr.row /= currAddr.row then
-                        prechargeBurst := true;
-                    end if;
-                -- else just keep the row open after burst end
-                else
-                    -- FIXME: implement
-                    schedule_bank_activation(thisAddr);
-                end if;
-            end if;
-        end procedure schedule_addr_prefetch;
-
+        -- self-explanatory save current bank state (to keep track of Activating/Precharging)
         procedure update_bank_state(cmd : in Cmd_T; rowAddr : in Addr_T; bankAddr : in Bank_Addr_T) is
             variable currBank : Bank_Ptr_T := to_safe_natural(bankAddr);
         begin
@@ -200,113 +163,149 @@ begin
             end case;
         end procedure update_bank_state;
 
-        procedure schedule_cmd(cmd : in Ctrl_Executable_Cmd_T; addr : in Ctrl_Addr_R) is
-            variable mainCmd         : Tmp_Cmd_T            := cmd_to_op(cmd);
-            variable cmdBuilder      : Cmd_Plan_Array_T     := (others => Precharge);
-            variable currBank        : Bank_Ptr_T           := to_integer(addr.bank);
-            variable lastCmdPtr      : natural range 0 to 3 := 0;
-            variable shouldPrecharge : boolean              := bankState(currBank).active and bankState(currBank).row /= addr.row;
-            variable shouldActivate  : boolean              := not bankState(currBank).active or bankState(currBank).row /= addr.row;
-            variable lastNextCmd     : Mem_IO_Aggregate_R;
+        -- create execution plan according to current state
+        impure function create_execution_plan(op : Schedulable_Op_T; addr : Ctrl_Addr_R) return Execution_Plan_R is
+            variable executableOp  : Executable_Op_T       := sched_op_map(op);
+            variable cmdBuilder    : Executable_Op_Array_T := (others => Precharge);
+            variable cmdPtrBuilder : integer range -1 to 3 := -1;
+
+            -- helper state variables
+            variable currBank        : Bank_Ptr_T := to_integer(addr.bank);
+            variable shouldPrecharge : boolean    := bankState(currBank).active and bankState(currBank).row /= addr.row;
+            variable shouldActivate  : boolean    := not bankState(currBank).active or bankState(currBank).row /= addr.row;
+        begin
+            if op /= Active then
+                cmdPtrBuilder             := cmdPtrBuilder + 1;
+                cmdBuilder(cmdPtrBuilder) := executableOp;
+            end if;
+
+            if op /= Refresh and shouldActivate then
+                cmdPtrBuilder             := cmdPtrBuilder + 1;
+                cmdBuilder(cmdPtrBuilder) := Active;
+            end if;
+
+            if op /= Refresh and shouldPrecharge then
+                cmdPtrBuilder             := cmdPtrBuilder + 1;
+                cmdBuilder(cmdPtrBuilder) := Precharge;
+            elsif op = Refresh and not all_banks_precharged then
+                cmdPtrBuilder             := cmdPtrBuilder + 1;
+                cmdBuilder(cmdPtrBuilder) := PrechargeAll;
+            end if;
+
+            -- waitForBurstEnd setting is a schedulers' responsibility
+            return (
+                addr            => addr,
+                cmdPlan         => cmdBuilder,
+                cmdPtr          => cmdPtrBuilder,
+                waitForBurstEnd => false
+            );
+        end function create_execution_plan;
+
+        -- schedule generated execute plan according to current ctrl/mem state
+        procedure schedule_cmd(thisPlan : in Execution_Plan_R) is
+            variable tmpPlan  : Execution_Plan_R := thisPlan;
+            variable firstCmd : Executable_Op_T  := tmpPlan.cmdPlan(tmpPlan.cmdPtr);
         begin
             -- default values
             currState   <= ExecutePlan;
             waitCounter <= 0;
 
-            -- create execution plan according to command
-            case cmd is
-                when Read  | Write =>
-                    cmdBuilder(0) := mainCmd;
-                    if cmd = Write then
-                        lastNextCmd := write((others => '0'), addr.bank, false);
-                    else
-                        lastNextCmd := read((others => '0'), addr.bank, false);
-                    end if;
+            if tmpPlan.cmdPtr >= 0 then
+                if burstState.inBurst then
+                    case firstCmd is
+                        -- we can start a Read burst immediately following a Read/Write burst
+                        when Read =>
+                            burst_start(Read);
+                            currState <= Burst;
 
-                    if shouldActivate then
-                        cmdBuilder(1) := Active;
-                        lastCmdPtr    := lastCmdPtr + 1;
-                        lastNextCmd   := active(addr.row, addr.bank);
-                    end if;
+                        when Write =>
+                            -- we can start a Write burst immediately following a Write burst
+                            if burstState.burstType = Write then
+                                burst_start(Write);
+                                currState <= Burst;
 
-                    if shouldPrecharge then
-                        cmdBuilder(2) := Precharge;
-                        lastCmdPtr    := lastCmdPtr + 1;
-                        lastNextCmd   := precharge(addr.bank, false);
-                    end if;
+                            -- but we have to wait until Read burst data come throught (tCAS delay)
+                            else
+                                tmpPlan.waitForBurstEnd := true;
+                            end if;
 
-                when Refresh =>
-                    cmdBuilder(0) := Refresh;
-                    lastNextCmd   := refresh;
+                        when Active =>
+                            -- Active command to same bank should never be first executable op during a burst
+                            assert tmpPlan.addr.bank /= currAddr.bank
+                            report "Cannot Acitvate current bank without Precharging first"
+                            severity error;
 
-                    if not all_banks_precharged then
-                        cmdBuilder(1) := PrechargeAll;
-                        lastCmdPtr    := lastCmdPtr + 1;
-                        lastNextCmd   := precharge(addr.bank, true);
-                    end if;
-            end case;
+                            -- if burst counter = 0 we let the ctrl issue a burst terminate command
+                            -- and only the do we issue an Active command to another bank
+                            if burstState.counter /= 0 then
+                                nextCmd        <= executable_op_to_mem_io(firstCmd, tmpPlan.addr);
+                                waitCounter    <= cmd_delay(Active) - 1;
+                                tmpPlan.cmdPtr := tmpPlan.cmdPtr - 1;
+                            end if;
+                        -- IMPLICIT ELSE
+                        -- wait one clock to issue a burst stop command, then
+                        -- begin activating another row/bank
 
-            currPlan <= (
-                addr            => addr,
-                cmdPlan         => cmdBuilder,
-                cmdPtr          => lastCmdPtr,
-                waitForBurstEnd => false
-            );
+                        when Precharge | PrechargeAll =>
+                            assert burstState.counter <= 0 or tmpPlan.addr.bank /= currAddr.bank
+                            report "Shouldn't generate a Precharge to currently bursting bank during a valid burst region"
+                            severity error;
 
-            if burstState.inBurst then
-                if cmd = Read then
-                    -- if we want to start a read burst to same bank/row or
-                    -- another already active bank/row, we can start immediately
-                    if not shouldPrecharge and not shouldActivate then
-                        burst_start(cmd);
-                        currState       <= Burst;
-                        currPlan.cmdPtr <= lastCmdPtr - 1;
-                    -- if we want to start a read burst to same bank but
-                    -- another row, end current burst by a precharge cmd
-                    elsif (shouldPrecharge and addr.bank = lastAddr.bank and burstState.burstType = Read) or burstState.counter < 0 then
-                        nextCmd         <= lastNextCmd;
-                        waitCounter     <= cmd_delay(lastNextCmd.cmd) - 1;
-                        currPlan.cmdPtr <= lastCmdPtr - 1;
-                    end if;
-                -- IMPLICIT ELSE
-                -- just wait for one cycle to let burst terminate command apply
-                -- wait is implicit in state transition
+                            if not (tmpPlan.addr.bank /= currAddr.bank and burstState.counter = 0) then
+                                nextCmd        <= executable_op_to_mem_io(firstCmd, tmpPlan.addr);
+                                waitCounter    <= cmd_delay(Precharge) - 1;
+                                tmpPlan.cmdPtr := tmpPlan.cmdPtr - 1;
+                            end if;
+                        -- IMPLICIT ELSE
+                        -- wait one clock to let Burst Terminate command be issued
 
-                -- TODO: add helpful comment
-                elsif cmd = Write then
-                    if (shouldPrecharge and burstState.burstType = Read) or (shouldActivate and burstState.counter < 0) then
-                        nextCmd         <= lastNextCmd;
-                        waitCounter     <= cmd_delay(lastNextCmd.cmd) - 1;
-                        currPlan.cmdPtr <= lastCmdPtr - 1;
-                    elsif not shouldPrecharge and not shouldActivate and burstState.burstType = Write then
-                        burst_start(cmd);
-                        currState       <= Burst;
-                        currPlan.cmdPtr <= lastCmdPtr - 1;
-                    else
-                        currPlan.waitForBurstEnd <= true;
-                    end if;
+                        when Refresh =>
+                            report "Cannot do a Refresh during Burst (invalid command)" severity error;
 
-                -- if we are in burst and want to Refresh banks, we implicitly
-                -- have to precharge all banks
-                elsif cmd = Refresh then
-                    if burstState.burstType = Read then
-                        nextCmd         <= lastNextCmd;
-                        waitCounter     <= cmd_delay(lastNextCmd.cmd) - 1;
-                        currPlan.cmdPtr <= lastCmdPtr - 1;
-                    else
-                        currPlan.waitForBurstEnd <= true;
-                    end if;
+                    end case;
+                else
+                    case firstCmd is
+                        when Read =>
+                            burst_start(Read);
+                            currState <= Burst;
+
+                        when Write =>
+                            burst_start(Write);
+                            currState <= Burst;
+
+                        when others =>
+                            nextCmd        <= executable_op_to_mem_io(firstCmd, tmpPlan.addr);
+                            waitCounter    <= cmd_delay(executable_op_to_mem_io(firstCmd, tmpPlan.addr).cmd) - 1;
+                            tmpPlan.cmdPtr := tmpPlan.cmdPtr - 1;
+
+                    end case;
                 end if;
             else
-                if (cmd = Write or cmd = Read) and lastCmdPtr = 0 then
-                    burst_start(cmd);
+                report "Should always create execution plan containing atleast one operation"
+                severity error;
+            end if;
+
+            -- queue updated plan for execution by Plan Executor
+            currPlan <= tmpPlan;
+        end procedure schedule_cmd;
+
+        -- try to queue row/bank activation based on next predicted address
+        procedure schedule_addr_prefetch(thisAddr, otherAddr : in Ctrl_Addr_R; thisOp : Burst_Op_T) is
+            variable shouldPrefetchAddr : boolean := should_prefetch_addr(thisAddr, otherAddr, thisOp);
+        begin
+            -- if next predicted bank is the same as the one being bursted
+            -- either keep it open or precharge it at the end of the burst
+            if shouldPrefetchAddr then
+                if thisAddr.bank = currAddr.bank then
+                    if thisAddr.row /= currAddr.row then
+                        prechargeBurst := true;
+                    end if;
+                -- else just keep the row open after burst end
                 else
-                    nextCmd         <= lastNextCmd;
-                    waitCounter     <= cmd_delay(lastNextCmd.cmd) - 1;
-                    currPlan.cmdPtr <= lastCmdPtr - 1;
+                    schedule_cmd(create_execution_plan(Active, thisAddr));
                 end if;
             end if;
-        end procedure schedule_cmd;
+        end procedure schedule_addr_prefetch;
     begin
         if rstAsyncIn = '1' then
             -- by default mask data
@@ -375,7 +374,11 @@ begin
 
                         case currCmd is
                             when Read | Write =>
-                                schedule_cmd(currCmd, currAddr);
+                                if currCmd = Read then
+                                    schedule_cmd(create_execution_plan(Read, currAddr));
+                                else
+                                    schedule_cmd(create_execution_plan(Write, currAddr));
+                                end if;
                                 prefetchData(currCmd)                     := (
                                     lastAddr     => currAddr,
                                     cmdCounter   => prefetchData(currCmd).cmdCounter + 1,
@@ -386,7 +389,7 @@ begin
                                 prechargeBurst                            := false;
 
                             when Refresh =>
-                                schedule_cmd(currCmd, currAddr);
+                                schedule_cmd(create_execution_plan(Refresh, currAddr));
                                 prechargeBurst := false;
 
                             -- precharge current bank after a read/write burst 
@@ -406,24 +409,15 @@ begin
                         if waitCounter = 0 then
                             if (not currPlan.waitForBurstEnd or not burstState.inBurst) then
                                 if currPlan.cmdPtr >= 0 then
-                                    case currPlan.cmdPlan(currPlan.cmdPtr) is
-                                        when Read | Write =>
-                                            burst_start(currCmd);
-                                            currState <= Burst;
-                                        when Precharge =>
-                                            nextCmd     <= precharge(currPlan.addr.bank, false);
-                                            waitCounter <= cmd_delay(Precharge) - 1;
-                                        when Refresh =>
-                                            nextCmd     <= refresh;
-                                            waitCounter <= cmd_delay(Refresh) - 1;
-                                        when Active =>
-                                            nextCmd     <= active(currPlan.addr.row, currPlan.addr.bank);
-                                            waitCounter <= cmd_delay(Active) - 1;
-                                        when PrechargeAll =>
-                                            nextCmd     <= precharge(currPlan.addr.bank, true);
-                                            waitCounter <= cmd_delay(Precharge) - 1;
-                                    end case;
+                                    currPlanCmd := currPlan.cmdPlan(currPlan.cmdPtr);
 
+                                    if currPlanCmd = Read or currPlanCmd = Write then
+                                        burst_start(currCmd);
+                                        currState <= Burst;
+                                    else
+                                        nextCmd     <= executable_op_to_mem_io(currPlanCmd, currPlan.addr);
+                                        waitCounter <= cmd_delay(executable_op_to_mem_io(currPlanCmd, currPlan.addr).cmd) - 1;
+                                    end if;
                                     currPlan.cmdPtr <= currPlan.cmdPtr - 1;
                                 else
                                     if burstState.inBurst then
@@ -441,20 +435,14 @@ begin
                         if not prefetchData(Read).isPrefetched then
                             prefetchData(Read).isPrefetched := true;
                             schedule_addr_prefetch(next_row_addr(prefetchData(Read).lastAddr, ROW_MAX), next_row_addr(prefetchData(Write).lastAddr, ROW_MAX), Read);
-                            currState                       <= ExecutePlan;
 
                         elsif not prefetchData(Write).isPrefetched then
                             prefetchData(Write).isPrefetched := true;
                             schedule_addr_prefetch(next_row_addr(prefetchData(Write).lastAddr, ROW_MAX), next_row_addr(prefetchData(Read).lastAddr, ROW_MAX), Write);
-                            currState                        <= ExecutePlan;
 
                         -- subtract state change penalty (state register takes new value only after next rising_edge)
                         elsif burstState.counter = 1 then
-                            -- reset prefetch state
-                            for i in Op_T loop
-                                prefetchData(i).isPrefetched := false;
-                            end loop;
-
+                            reset_prefetch_state;
                             currState <= Idle;
                         end if;
                 end case;

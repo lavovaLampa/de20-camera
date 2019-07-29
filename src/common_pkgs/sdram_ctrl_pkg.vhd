@@ -8,15 +8,27 @@ package sdram_ctrl_pkg is
 
     type Ctrl_Cmd_T is (NoOp, Read, Write, Refresh);
     subtype Ctrl_Executable_Cmd_T is Ctrl_Cmd_T range Read to Refresh;
+    subtype Burst_Op_T is Ctrl_Cmd_T range Read to Write;
     subtype Ctrl_Addr_T is unsigned(ADDR_WIDTH - 1 downto 0);
+
+    type Schedulable_Op_T is (Read, Write, Active, Refresh);
+    type Executable_Op_T is (Read, Write, Refresh, Active, Precharge, PrechargeAll);
+
     subtype Burst_Counter_Range_T is integer range -tCAS to 2**COL_ADDR_WIDTH;
 
-    subtype Op_T is Ctrl_Cmd_T range Read to Write;
-    type Burst_Len_T is array (Op_T) of natural;
-    type Next_Op_Map_T is array (Op_T) of Op_T;
+    type Next_Op_Map_T is array (Burst_Op_T) of Burst_Op_T;
     constant next_op : Next_Op_Map_T := (
         Read  => Write,
         Write => Read
+    );
+    type Burst_Len_T is array (Burst_Op_T) of natural;
+
+    type Schedulable_To_Executable_Op_Map_T is array (Schedulable_Op_T) of Executable_Op_T;
+    constant sched_op_map : Schedulable_To_Executable_Op_Map_T := (
+        Read    => Read,
+        Write   => Write,
+        Active  => Active,
+        Refresh => Refresh
     );
 
     type Ctrl_Addr_R is record
@@ -33,7 +45,7 @@ package sdram_ctrl_pkg is
     type Burst_State_R is record
         inBurst         : boolean;
         counter         : Burst_Counter_Range_T;
-        burstType       : Op_T;
+        burstType       : Burst_Op_T;
         interleavedRead : boolean;
     end record Burst_State_R;
 
@@ -43,20 +55,20 @@ package sdram_ctrl_pkg is
         isPrefetched : boolean;
     end record Prefetch_Data_R;
 
-    type Tmp_Cmd_T is (Read, Write, Refresh, Active, Precharge, PrechargeAll);
-    type Cmd_Plan_Array_T is array (0 to 3) of Tmp_Cmd_T;
+    type Executable_Op_Array_T is array (0 to 3) of Executable_Op_T;
     type Execution_Plan_R is record
         addr            : Ctrl_Addr_R;
-        cmdPlan         : Cmd_Plan_Array_T;
+        cmdPlan         : Executable_Op_Array_T;
         cmdPtr          : integer range -1 to 3;
         waitForBurstEnd : boolean;
     end record Execution_Plan_R;
 
-    type Prefetch_Array_T is array (Op_T) of Prefetch_Data_R;
+    type Prefetch_Array_T is array (Burst_Op_T) of Prefetch_Data_R;
 
     pure function next_row_addr(addrRecord : Ctrl_Addr_R; rowMax : natural) return Ctrl_Addr_R;
     pure function addr_to_record(addr : Ctrl_Addr_T) return Ctrl_Addr_R;
-    pure function cmd_to_op(cmd : Ctrl_Executable_Cmd_T) return Tmp_Cmd_T;
+    pure function cmd_to_op(cmd : Ctrl_Executable_Cmd_T) return Executable_Op_T;
+    pure function executable_op_to_mem_io(op : Executable_Op_T; addr : Ctrl_Addr_R) return Mem_IO_Aggregate_R;
 end package sdram_ctrl_pkg;
 
 package body sdram_ctrl_pkg is
@@ -84,7 +96,7 @@ package body sdram_ctrl_pkg is
         end if;
     end function next_row_addr;
 
-    pure function cmd_to_op(cmd : Ctrl_Executable_Cmd_T) return Tmp_Cmd_T is
+    pure function cmd_to_op(cmd : Ctrl_Executable_Cmd_T) return Executable_Op_T is
     begin
         case cmd is
             when Read    => return Read;
@@ -92,4 +104,16 @@ package body sdram_ctrl_pkg is
             when Refresh => return Refresh;
         end case;
     end function cmd_to_op;
+
+    pure function executable_op_to_mem_io(op : Executable_Op_T; addr : Ctrl_Addr_R) return Mem_IO_Aggregate_R is
+    begin
+        case op is
+            when Read         => return read((others => '0'), addr.bank, false);
+            when Write        => return write((others => '0'), addr.bank, false);
+            when Refresh      => return refresh;
+            when Active       => return active(addr.row, addr.bank);
+            when Precharge    => return precharge(addr.bank, false);
+            when PrechargeAll => return precharge(addr.bank, true);
+        end case;
+    end function executable_op_to_mem_io;
 end package body sdram_ctrl_pkg;
