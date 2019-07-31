@@ -24,6 +24,7 @@ architecture rtl of sdram_init_ctrl is
     signal nextIo      : Mem_IO_Aggregate_R                          := nop;
     signal nextData    : Data_T                                      := (others => 'Z');
     signal waitCounter : integer range -1 to INIT_DELAY_CYCLES + 100 := 0;
+    signal dqm         : Dqm_T                                       := (others => '1');
 
     signal clkEnable : std_logic := '0';
 
@@ -36,7 +37,7 @@ begin
         addr         => nextIo.addr,
         bankSelect   => nextIo.bank,
         clkEnable    => clkEnable,
-        dqm          => (others => '0')
+        dqm          => dqm
     );
     memDataIo <= nextData;
 
@@ -44,23 +45,25 @@ begin
         -- reg
         variable currState      : Internal_State_T                           := InitDelay;
         -- we have to refresh all rows 2 times -> 2 * 2**ROW_ADDR_WIDTH = 2**(ROW_ADDR_WIDTH + 1)
-        variable refreshCounter : natural range 0 to 2**(ROW_ADDR_WIDTH + 1) := 2**(ROW_ADDR_WIDTH + 1);
+        variable refreshCounter : natural range 0 to 2**(ROW_ADDR_WIDTH + 1) := 2**(ROW_ADDR_WIDTH + 1) - 1;
     begin
         if rstAsyncIn = '1' then
             memInitializedOut <= false;
 
             nextIo      <= nop;
             nextData    <= (others => 'Z');
+            dqm         <= (others => '1');
             waitCounter <= INIT_DELAY_CYCLES;
             clkEnable   <= '0';
 
             currState      := InitDelay;
-            refreshCounter := 2**(ROW_ADDR_WIDTH + 1);
+            refreshCounter := 2**(ROW_ADDR_WIDTH + 1) - 1;
         elsif rising_edge(clkIn) then
             -- by default send nop command
             clkEnable <= '1';
             nextIo    <= nop;
             nextData  <= (others => 'Z');
+            dqm       <= (others => '1');
 
             if clkStableIn then
                 waitCounter <= waitCounter - 1 when currState /= Done;
@@ -86,6 +89,7 @@ begin
                                 currState   := LoadModeReg;
                                 nextIo      <= load_mode_reg(MODE_REG);
                                 nextData    <= MODE_REG;
+                                dqm         <= (others => '0');
                                 waitCounter <= cmd_delay(LoadModeReg) - 1;
                             else
                                 refreshCounter := refreshCounter - 1;

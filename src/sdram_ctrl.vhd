@@ -18,21 +18,23 @@ entity sdram_ctrl is
         )
     );
     port(
-        clkIn, rstAsyncIn         : in    std_logic;
+        clkIn, rstAsyncIn : in    std_logic;
         -- ==============================
         -- |    row_addr    | bank_addr |
         -- ==============================
         -- 13              2 1          0
-        addrIn                    : in    Ctrl_Addr_T;
-        cmdIn                     : in    Ctrl_Cmd_T;
-        cmdReadyOut, dataReadyOut : out   boolean;
-        dataIn                    : in    Data_T;
-        dataOut                   : out   Data_T;
+        addrIn            : in    Ctrl_Addr_T;
+        cmdIn             : in    Ctrl_Cmd_T;
+        cmdReadyOut       : out   boolean;
+        dataReadyOut      : out   boolean; -- new data ready for reading
+        nextDataOut       : out   boolean; -- get next data ready for writing
+        dataIn            : in    Data_T;
+        dataOut           : out   Data_T;
         -- init controller I/O
-        memInitializedIn          : in    boolean;
+        memInitializedIn  : in    boolean;
         -- SDRAM I/O
-        sdramOut                  : out   Mem_IO_R;
-        sdramDataIo               : inout Data_T := (others => 'Z')
+        sdramOut          : out   Mem_IO_R;
+        sdramDataIo       : inout Data_T := (others => 'Z')
     );
     constant CTRL_ALERT_ID : AlertLogIDType := GetAlertLogID("CTRL MEM", ALERTLOG_BASE_ID);
 end entity sdram_ctrl;
@@ -41,15 +43,18 @@ architecture RTL of sdram_ctrl is
     type Internal_State_T is (Idle, ExecutePlan, Burst);
 
     -- SDRAM I/O
-    signal nextCmd : Mem_IO_Aggregate_R;
-    signal dqm     : Dqm_T;
+    signal nextCmd  : Mem_IO_Aggregate_R;
+    signal dqm      : Dqm_T;
+    signal nextData : Data_T := (others => 'Z'); -- i/o reg
 
     -- internal registers
-    signal bankState   : Bank_State_Array_T    := (others => (active => false, row => (others => '0')));
-    signal burstState  : Burst_State_R         := (inBurst => false, counter => 0, burstType => Write, interleavedRead => false);
-    signal currState   : Internal_State_T      := Idle;
-    signal currPlan    : Execution_Plan_R      := (addr => addr_to_record((others => '0')), cmdPlan => (others => Precharge), cmdPtr => 0, waitForBurstEnd => false);
-    signal waitCounter : natural range 0 to 10 := 0;
+    signal bankState      : Bank_State_Array_T    := (others => (active => false, row => (others => '0')));
+    signal burstState     : Burst_State_R         := (counter => Burst_Counter_Range_T'low, burstType => Write, interleavedRead => false, interleaveDelay => 0);
+    signal bursting       : boolean               := false;
+    signal currState      : Internal_State_T      := Idle;
+    signal currPlan       : Execution_Plan_R      := (addr => addr_to_record((others => '0')), cmdPlan => (others => Precharge), cmdPtr => 0, waitForBurstEnd => false);
+    signal waitCounter    : natural range 0 to 10 := 0;
+    signal prechargeBurst : boolean               := false;
 
     -- debug signals
     signal dbgLastAddr     : Ctrl_Addr_R;
@@ -58,20 +63,23 @@ architecture RTL of sdram_ctrl is
     signal dbgPrefetchData : Prefetch_Array_T;
 begin
     -- pack sdram signals
-    sdramOut <= (
+    sdramOut    <= (
         addr         => nextCmd.addr,
         bankSelect   => nextCmd.bank,
         cmdAggregate => encode_cmd(nextCmd.cmd),
         dqm          => dqm,
         clkEnable    => '1'
     );
+    sdramDataIo <= nextData;
+
+    -- signal applies to internal controller cmd operations
+    bursting <= (burstState.burstType = Write and burstState.counter > -1) or (burstState.burstType = Read and burstState.counter > -tCAS);
 
     mainProc : process(clkIn, rstAsyncIn)
         -- reg
         variable currAddr, lastAddr : Ctrl_Addr_R      := addr_to_record((others => '0'));
         variable currCmd            : Ctrl_Cmd_T       := NoOp;
         variable prefetchData       : Prefetch_Array_T := (others => (lastAddr => addr_to_record((others => '0')), cmdCounter => 0, isPrefetched => false));
-        variable prechargeBurst     : boolean          := false;
 
         -- helpers (think of these variables as aliases)
         variable bankPtr     : Bank_Ptr_T := 0;
@@ -98,24 +106,26 @@ begin
 
         -- start a burst and setup burst state
         procedure burst_start(burstType : in Burst_Op_T) is
-            variable interleavedRead : boolean := burstType = Read and (burstState.inBurst and burstState.burstType = Read and burstState.counter = 0);
+            variable interleavedRead : boolean :=
+                (burstType = Read and (bursting and burstState.burstType = Read and burstState.counter = 0)) or 
+                (burstType = Write and burstState.burstType = Read and burstState.counter = -tCAS);
         begin
             case burstType is
                 when Read =>
                     nextCmd <= read((others => '0'), currAddr.bank, false);
                 when Write =>
-                    nextCmd     <= write((others => '0'), currAddr.bank, false);
-                    sdramDataIo <= dataIn;
-                    dqm         <= (others => '0');
+                    nextCmd  <= write((others => '0'), currAddr.bank, false);
+                    nextData <= dataIn;
             end case;
+            dqm <= (others => '0');
 
             burstState     <= (
                 counter         => 2**COL_ADDR_WIDTH - 1,
-                inBurst         => true,
                 burstType       => burstType,
-                interleavedRead => interleavedRead
+                interleavedRead => interleavedRead,
+                interleaveDelay => 0
             );
-            prechargeBurst := false;
+            prechargeBurst <= false;
         end procedure burst_start;
 
         -- return whether we should try to early activate this address' bank/row
@@ -174,17 +184,17 @@ begin
             variable shouldPrecharge : boolean    := bankState(currBank).active and bankState(currBank).row /= addr.row;
             variable shouldActivate  : boolean    := not bankState(currBank).active or bankState(currBank).row /= addr.row;
         begin
-            if op /= Active then
+            if op /= Active and op /= Precharge then
                 cmdPtrBuilder             := cmdPtrBuilder + 1;
                 cmdBuilder(cmdPtrBuilder) := executableOp;
             end if;
 
-            if op /= Refresh and shouldActivate then
+            if op /= Refresh and op /= Precharge and shouldActivate then
                 cmdPtrBuilder             := cmdPtrBuilder + 1;
                 cmdBuilder(cmdPtrBuilder) := Active;
             end if;
 
-            if op /= Refresh and shouldPrecharge then
+            if op = Precharge or (op /= Refresh and shouldPrecharge) then
                 cmdPtrBuilder             := cmdPtrBuilder + 1;
                 cmdBuilder(cmdPtrBuilder) := Precharge;
             elsif op = Refresh and not all_banks_precharged then
@@ -211,7 +221,7 @@ begin
             waitCounter <= 0;
 
             if tmpPlan.cmdPtr >= 0 then
-                if burstState.inBurst then
+                if bursting then
                     case firstCmd is
                         -- we can start a Read burst immediately following a Read/Write burst
                         when Read =>
@@ -251,7 +261,7 @@ begin
                             report "Shouldn't generate a Precharge to currently bursting bank during a valid burst region"
                             severity error;
 
-                            if not (tmpPlan.addr.bank /= currAddr.bank and burstState.counter = 0) then
+                            if not (tmpPlan.addr.bank /= currAddr.bank and burstState.counter = 0) and burstState.burstType = Read then
                                 nextCmd        <= executable_op_to_mem_io(firstCmd, tmpPlan.addr);
                                 waitCounter    <= cmd_delay(Precharge) - 1;
                                 tmpPlan.cmdPtr := tmpPlan.cmdPtr - 1;
@@ -285,7 +295,7 @@ begin
                 severity error;
             end if;
 
-            -- queue updated plan for execution by Plan Executor
+            -- queue the updated plan for execution by Plan Executor
             currPlan <= tmpPlan;
         end procedure schedule_cmd;
 
@@ -298,7 +308,7 @@ begin
             if shouldPrefetchAddr then
                 if thisAddr.bank = currAddr.bank then
                     if thisAddr.row /= currAddr.row then
-                        prechargeBurst := true;
+                        prechargeBurst <= true;
                     end if;
                 -- else just keep the row open after burst end
                 else
@@ -309,55 +319,49 @@ begin
     begin
         if rstAsyncIn = '1' then
             -- by default mask data
-            dqm        <= (others => '1');
-            burstState <= (inBurst => false, counter => 0, burstType => Read, interleavedRead => false);
-            currPlan   <= (addr => addr_to_record((others => '0')), cmdPlan => (others => Precharge), cmdPtr => 0, waitForBurstEnd => false);
-            currState  <= Idle;
+            dqm            <= (others => '1');
+            burstState     <= (counter => Burst_Counter_Range_T'low, burstType => Write, interleavedRead => false, interleaveDelay => 0);
+            currPlan       <= (addr => addr_to_record((others => '0')), cmdPlan => (others => Precharge), cmdPtr => 0, waitForBurstEnd => false);
+            currState      <= Idle;
+            nextData       <= (others => 'Z');
+            prechargeBurst <= false;
 
             prefetchData := (others => (lastAddr => addr_to_record((others => '0')), cmdCounter => 0, isPrefetched => false));
             lastAddr     := addr_to_record((others => '0'));
         elsif rising_edge(clkIn) then
             -- signals only active for one clock
-            nextCmd     <= nop;
-            sdramDataIo <= (others => 'Z');
-            dqm         <= (others => '1');
+            nextCmd  <= nop;
+            dqm      <= (others => '1');
+            nextData <= (others => 'Z');
+            dataOut  <= (others => '-');
 
             -- update bank_state according to currently scheduled sdram cmd batch
             update_bank_state(nextCmd.cmd, nextCmd.addr, nextCmd.bank);
 
             if memInitializedIn then
                 -- decrement burst counter
-                if burstState.counter > -tCAS then
+                if burstState.counter > Burst_Counter_Range_T'low then
                     burstState.counter <= burstState.counter - 1;
                 end if;
 
                 -- burst state and data handling
-                if burstState.inBurst then
-                    -- let the data go High-Z after a full page burst
-                    if currCmd = Write then
-                        if burstState.counter > 0 then
-                            dqm         <= (others => '0');
-                            sdramDataIo <= dataIn;
-                        end if;
-                    elsif currCmd = Read then
-                        if burstState.counter >= -tCAS and (burstState.counter <= PAGE_LEN - tCAS or burstState.interleavedRead) then
-                            dqm     <= (others => '0');
-                            dataOut <= sdramDataIo;
-                        end if;
+                if burstState.burstType = Read then
+                    if (burstState.counter < PAGE_LEN - (tCAS - tDQZ) and burstState.counter > (tDQZ - tCAS)) or (burstState.interleavedRead and burstState.counter >= PAGE_LEN - (tCAS - tDQZ)) then
+                        dqm <= (others => '0');
                     end if;
+                    if (burstState.counter >= -tCAS and burstState.counter < PAGE_LEN - tCAS) or (burstState.interleavedRead and burstState.counter >= PAGE_LEN - tCAS) then
+                        dataOut <= sdramDataIo;
+                    end if;
+                elsif burstState.burstType = Write then
+                    if burstState.counter > 0 then
+                        dqm      <= (others => '0');
+                        nextData <= dataIn;
+                    end if;
+                end if;
 
-                    if burstState.counter = 0 then
-                        -- end read/write burst (cmd can be overwritten for interleaved writes/reads)
-                        nextCmd <= burst_terminate;
-                    end if;
-
-                    -- a write burst end indicates that we can use any command
-                    if burstState.counter = 0 and burstState.burstType = Write then
-                        burstState.inBurst <= false;
-                    -- a read burst end indicates that we can use any command (including a write)
-                    elsif burstState.counter = -tCAS + 1 and burstState.burstType = Read then
-                        burstState.inBurst <= false;
-                    end if;
+                if burstState.counter = 0 then
+                    -- end read/write burst (cmd can be overwritten for interleaved writes/reads)
+                    nextCmd <= burst_terminate;
                 end if;
 
                 -- sdram cmd & state handling
@@ -386,28 +390,25 @@ begin
                                 );
                                 prefetchData(next_op(currCmd)).cmdCounter := 0;
                                 lastAddr                                  := currAddr;
-                                prechargeBurst                            := false;
+                                prechargeBurst                            <= false;
 
                             when Refresh =>
                                 schedule_cmd(create_execution_plan(Refresh, currAddr));
-                                prechargeBurst := false;
+                                prechargeBurst <= false;
 
                             -- precharge current bank after a read/write burst 
                             -- if the action is not interrupted by another command
                             when NoOp =>
                                 if prechargeBurst then
-                                    if burstState.burstType = Read or (burstState.burstType = Write and burstState.inBurst = false) then
-                                        currState   <= ExecutePlan;
-                                        nextCmd     <= precharge(lastAddr.bank, false);
-                                        waitCounter <= cmd_delay(Precharge) - 1;
-                                    end if;
+                                    schedule_cmd(create_execution_plan(Precharge, lastAddr));
+                                    prechargeBurst <= false;
                                 end if;
                         end case;
 
                     -- execute cmd plan
                     when ExecutePlan =>
                         if waitCounter = 0 then
-                            if (not currPlan.waitForBurstEnd or not burstState.inBurst) then
+                            if (not currPlan.waitForBurstEnd or not bursting) then
                                 if currPlan.cmdPtr >= 0 then
                                     currPlanCmd := currPlan.cmdPlan(currPlan.cmdPtr);
 
@@ -420,7 +421,7 @@ begin
                                     end if;
                                     currPlan.cmdPtr <= currPlan.cmdPtr - 1;
                                 else
-                                    if burstState.inBurst then
+                                    if bursting then
                                         currState <= Burst;
                                     else
                                         currState <= Idle;
@@ -466,14 +467,18 @@ begin
                     when Idle =>
                         case cmdIn is
                             when NoOp =>
-                                cmdReadyOut <= true;
+                                if prechargeBurst then
+                                    cmdReadyOut <= false;
+                                else
+                                    cmdReadyOut <= true;
+                                end if;
 
                             when Read | Write | Refresh =>
                                 cmdReadyOut <= false;
                         end case;
 
                     when ExecutePlan =>
-                        if waitCounter = 0 and (not currPlan.waitForBurstEnd or not burstState.inBurst) and currPlan.cmdPtr = -1 and not burstState.inBurst then
+                        if waitCounter = 0 and (not currPlan.waitForBurstEnd or not bursting) and currPlan.cmdPtr = -1 and not bursting then
                             cmdReadyOut <= true;
                         end if;
 
@@ -486,13 +491,33 @@ begin
         end if;
     end process readyFlagProc;
 
-    dataFlagProc : process(clkIn, rstAsyncIn)
-        -- alternative counter shifted by CAS cycles (for read bursts)
-        variable burstCounter : natural range 0 to 2**COL_ADDR_WIDTH - 1 := 0;
+    dataFlagProc : process(burstState, currPlan, waitCounter, addrIn, cmdIn, bankState, currState, bursting)
+        variable currAddr : Ctrl_Addr_R := addr_to_record(addrIn);
+        variable bankPtr  : Bank_Ptr_T  := to_integer(currAddr.bank);
     begin
-        if rstAsyncIn = '1' then
-        elsif rising_edge(clkIn) then
+        currAddr := addr_to_record(addrIn);
+        bankPtr  := to_integer(currAddr.bank);
 
+        -- signalize to provide new data to write to memory during write burst
+        if burstState.burstType = Write and burstState.counter > 0 then
+            dataReadyOut <= true;
+        elsif currState = Idle and cmdIn = Write and bankState(bankPtr).active and bankState(bankPtr).row = currAddr.row and (burstState.burstType /= Read or burstState.counter <= -tCAS) then
+            dataReadyOut <= true;
+        elsif currPlan.cmdPtr >= 0 and currPlan.cmdPlan(currPlan.cmdPtr) = Write and waitCounter = 0 and (not currPlan.waitForBurstEnd or not bursting) then
+            dataReadyOut <= true;
+        else
+            dataReadyOut <= false;
+        end if;
+
+        -- signalize if new data arrived to be read from memory during read burst
+        if burstState.burstType = Read and burstState.counter >= -tCAS - 1 and burstState.counter < PAGE_LEN - tCAS - 1 then
+            nextDataOut <= true;
+        elsif burstState.burstType = Read and burstState.interleavedRead and burstState.counter >= PAGE_LEN - tCAS - 1 + burstState.interleaveDelay then
+            nextDataOut <= true;
+        elsif burstState.burstType = Write and burstState.interleavedRead and burstState.counter = PAGE_LEN - 1 then
+            nextDataOut <= true;
+        else
+            nextDataOut <= false;
         end if;
     end process dataFlagProc;
 end architecture RTL;

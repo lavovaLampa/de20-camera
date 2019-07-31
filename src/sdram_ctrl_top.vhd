@@ -49,6 +49,8 @@ begin
         ctrlMemOut when true,
         initMemOut when false;
 
+--    ctrlMemDataIo <= sdramDataIo;
+
     -- same with sdram data
     with memInitialized select sdramDataIo <=
         ctrlMemDataIo when true,

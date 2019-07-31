@@ -19,19 +19,23 @@ package sdram_model_pkg is
 
     type Input_Latch_R is record
         cmd  : Cmd_T;
-        dqm  : Dqm_T;
         addr : Addr_T;
         bank : Bank_Addr_T;
-        data : Data_T;
     end record Input_Latch_R;
 
     subtype Burst_Length_Range_T is natural range 1 to 2**COL_ADDR_WIDTH - 1;
-    type Data_Pipeline_T is array (0 to 9) of Data_T;
+    type Data_IO_R is record
+        data : Data_T;
+        dqm  : Dqm_T;
+    end record Data_IO_R;
+    type Data_In_Pipeline_T is array (0 to 3) of Data_IO_R;
+    type Data_Out_Pipeline_T is array (0 to 3) of Data_T;
 
     pure function logic_to_bool(val : std_logic) return boolean;
     pure function bank_next_state(currState : Bank_State_T) return Bank_State_T;
     pure function bank_transition_valid(currState : Bank_State_T; nextState : Bank_State_T) return boolean;
     pure function to_safe_natural(val : unsigned) return natural;
+    pure function mask_data(data : Data_T; dqm : Dqm_T) return Data_T;
 
     -- return number of cycles required for bank to transition from currState to nextState
     pure function bank_transition_delay(currState : Bank_State_T; nextState : Bank_State_T) return natural;
@@ -104,6 +108,17 @@ package body sdram_model_pkg is
             return false;
         end if;
     end function bank_transition_valid;
+
+    pure function mask_data(data : Data_T; dqm : Dqm_T) return Data_T is
+        variable tmpData : Data_T := data;
+    begin
+        for i in dqm'range loop
+            if dqm(i) = '1' then
+                tmpData(((i + 1) * 8) - 1 downto i * 8) := (others => 'Z');
+            end if;
+        end loop;
+        return tmpData;
+    end function mask_data;
 
     pure function bank_transition_delay(currState : Bank_State_T; nextState : Bank_State_T) return natural is
         type State_Delay_Map_T is array (Bank_State_T, Bank_State_T) of natural;

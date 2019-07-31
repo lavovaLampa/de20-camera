@@ -51,6 +51,9 @@ architecture tb of sdram_ctrl_tb is
     signal tbSimEnded : std_logic := '0';
     signal stimuliEnd : boolean   := false;
 
+    -- debug signals
+    signal dataPtrDebug : Col_Ptr_T;
+
 begin
     dut : entity work.sdram_ctrl_top
         generic map(
@@ -76,7 +79,7 @@ begin
     sdramModel : entity work.sdram_model
         generic map(
             LOAD_FROM_FILE => false,
-            DUMP_TO_FILE   => false
+            DUMP_TO_FILE   => true
         )
         port map(
             clkIn              => clkIn,
@@ -121,52 +124,86 @@ begin
 
         wait until stimuliEnd;
 
+        wait for 100 * CLK_PERIOD;
+        simEnded <= true;
+
         -- Stop the clock and hence terminate the simulation
         tbSimEnded <= '1';
         wait;
     end process;
 
     testProc : process(clkIn, rstAsyncIn, cmdReadyOut)
-        variable counter : natural     := 20;
-        variable addrOut : Ctrl_Addr_T := (others => '0');
+        variable cmdCounter : natural   := 10;
+        variable randomGen  : RandomPType;
+        variable dataPtr    : Col_Ptr_T := 0;
+
+        type Data_Array_T is array (Col_Ptr_T) of Data_T;
+        variable dataArray : Data_Array_T;
     begin
-        cmdIn  <= NoOp;
-        addrIn <= addrOut;
-        if cmdReadyOut then
-            if counter > 15 then
-                cmdIn <= Write;
-            elsif counter > 10 then
-                cmdIn <= Read;
-            elsif counter > 5 then
-                cmdIn <= Write;
-            else
-                cmdIn <= Read;
-            end if;
-        end if;
-
         if rstAsyncIn = '1' then
-            dataIn <= (others => '0');
-
             stimuliEnd <= false;
+            cmdCounter := 10;
+            dataPtr    := 0;
 
-            counter := 20;
-            addrOut := (others => '0');
+            randomGen.InitSeed(randomGen'instance_name);
+            for i in Col_Ptr_T loop
+                dataArray(i) := randomGen.RandSlv(16);
+            end loop;
         elsif rising_edge(clkIn) then
-            if cmdReadyOut then
-                if counter > 0 then
-                    counter := counter - 1;
+            if dataReadyOut then
+                if dataPtr < Col_Ptr_T'high then
+                    dataPtr := dataPtr + 1;
                 else
+                    dataPtr := 0;
+                end if;
+            else
+                dataPtr := 0;
+            end if;
+
+            if cmdReadyOut then
+                if cmdCounter = 0 then
                     stimuliEnd <= true;
-                end if;
-
-                if counter > 0 then
-                    addrOut := addrOut + 1;
-                end if;
-
-                if counter mod 5 = 0 then
-                    addrOut := (others => '0');
+                else
+                    cmdCounter := cmdCounter - 1;
                 end if;
             end if;
         end if;
+
+        dataPtrDebug <= dataPtr;
+        addrIn       <= (others => '0');
+        dataIn       <= dataArray(dataPtr);
+
+        if cmdReadyOut then
+            case cmdCounter is
+                when 10 =>
+                    cmdIn  <= Write;
+                    addrIn <= B"00_0000_0000_0000";
+                when 9 =>
+                    cmdIn  <= Write;
+                    addrIn <= B"00_0000_0000_0001";
+                when 8 =>
+                    cmdIn  <= Read;
+                    addrIn <= B"00_0000_0000_0000";
+                when 7 =>
+                    cmdIn  <= Read;
+                    addrIn <= B"00_0000_0000_0001";
+                when 6 => cmdIn <= Refresh;
+                when 5 => cmdIn <= Refresh;
+                when 4 =>
+                    cmdIn  <= Read;
+                    addrIn <= B"00_0000_0000_0001";
+                when 3 =>
+                    cmdIn  <= Write;
+                    addrIn <= B"00_0000_0000_0010";
+                when 2 => cmdIn <= Refresh;
+                when 1 =>
+                    cmdIn  <= Write;
+                    addrIn <= B"00_0000_0000_0011";
+                when others => cmdIn <= NoOp;
+            end case;
+        else
+            cmdIn <= NoOp;
+        end if;
+
     end process testProc;
 end tb;

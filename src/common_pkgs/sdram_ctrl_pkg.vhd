@@ -11,10 +11,10 @@ package sdram_ctrl_pkg is
     subtype Burst_Op_T is Ctrl_Cmd_T range Read to Write;
     subtype Ctrl_Addr_T is unsigned(ADDR_WIDTH - 1 downto 0);
 
-    type Schedulable_Op_T is (Read, Write, Active, Refresh);
+    type Schedulable_Op_T is (Read, Write, Active, Precharge, Refresh);
     type Executable_Op_T is (Read, Write, Refresh, Active, Precharge, PrechargeAll);
 
-    subtype Burst_Counter_Range_T is integer range -tCAS to 2**COL_ADDR_WIDTH;
+    subtype Burst_Counter_Range_T is integer range -tCAS - 2 to 2**COL_ADDR_WIDTH - 1;
 
     type Next_Op_Map_T is array (Burst_Op_T) of Burst_Op_T;
     constant next_op : Next_Op_Map_T := (
@@ -25,10 +25,11 @@ package sdram_ctrl_pkg is
 
     type Schedulable_To_Executable_Op_Map_T is array (Schedulable_Op_T) of Executable_Op_T;
     constant sched_op_map : Schedulable_To_Executable_Op_Map_T := (
-        Read    => Read,
-        Write   => Write,
-        Active  => Active,
-        Refresh => Refresh
+        Read      => Read,
+        Write     => Write,
+        Active    => Active,
+        Refresh   => Refresh,
+        Precharge => Precharge
     );
 
     type Ctrl_Addr_R is record
@@ -43,10 +44,10 @@ package sdram_ctrl_pkg is
     type Bank_State_Array_T is array (0 to BANK_COUNT - 1) of Bank_State_R;
 
     type Burst_State_R is record
-        inBurst         : boolean;
         counter         : Burst_Counter_Range_T;
         burstType       : Burst_Op_T;
         interleavedRead : boolean;
+        interleaveDelay : natural range 0 to tCAS;
     end record Burst_State_R;
 
     type Prefetch_Data_R is record

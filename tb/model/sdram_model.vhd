@@ -49,14 +49,16 @@ architecture model of sdram_model is
     signal writeBurstMode : Write_Burst_Mode_T := ProgrammedLength;
 
     -- internal signals (reg)
-    signal clkInternal     : std_logic       := '0';
-    signal dataOutPipeline : Data_Pipeline_T := (others => (others => 'Z'));
-    signal dataInPipeline  : Data_Pipeline_T := (others => (others => 'Z'));
+    signal clkInternal     : std_logic           := '0';
+    signal dataOutPipeline : Data_Out_Pipeline_T := (others => (others => 'Z'));
+    signal dataInPipeline  : Data_In_Pipeline_T  := (others => (data => (others => 'Z'), dqm => (others => '0')));
 
-    -- input data latch (register)
+    -- input cmd/addr latch (register)
     signal inputReg : Input_Latch_R;
 begin
-    dataIo <= dataOutPipeline(0);
+    -- mask data according to dqm
+    -- if mask bit is low, allow data to be read from target byte
+    dataIo <= mask_data(dataOutPipeline(0), dataInPipeline(tDQZ - 1).dqm);
 
     decodeBlock : block
         signal clkEnabled : std_logic := '0';
@@ -74,13 +76,16 @@ begin
         begin
             if rising_edge(clkInternal) then
                 -- latch signals on rising edge of clk
-                inputReg <= (
+                inputReg               <= (
                     addr => addrIn,
-                    dqm  => dqmIn,
                     cmd  => currCmd,
-                    bank => bankSelectIn,
-                    data => dataIo
+                    bank => bankSelectIn
                 );
+                dataInPipeline(0)      <= (
+                    data => dataIo,
+                    dqm  => dqmIn
+                );
+                dataInPipeline(1 to 3) <= dataInPipeline(0 to 2);
             end if;
         end process latchProc;
 
@@ -340,10 +345,11 @@ begin
 
             procedure write_mem(bank : in Bank_Ptr_T; row : in Row_Ptr_T; col : in Col_Ptr_T; data : in Data_T; dqm : in std_logic_vector(1 downto 0)) is
             begin
-                --                Log(SDRAM_ALERT_ID, "Writing to Bank: " & to_string(bank) & ", Row: " & to_string(row) & ", Col: " & to_string(col) & ", Dqm: " & to_bstring(dqm) & ", Data: " & to_hstring(data), DEBUG);
+                Log(SDRAM_ALERT_ID, "Writing to Bank: " & to_string(bank) & ", Row: " & to_string(row) & ", Col: " & to_string(col) & ", Dqm: " & to_bstring(dqm) & ", Data: " & to_hstring(data), DEBUG);
 
-                -- if data = all zeroes, we don't have to do nothing, that's the default state of mem
-                if data /= (data'range => '0') and dqm /= (dqm'range => '1') then
+                -- if all the data is masked or data is all zerores and curr row is not initialized
+                -- we don't have to write anything
+                if not ((data = (data'range => '0') and bankData(bank)(row) = NULL) or dqm = (dqm'range => '1')) then
                     init_mem(bank, row);
                     for i in dqm'range loop
                         -- mask data according to dqm
@@ -355,26 +361,15 @@ begin
                 end if;
             end procedure write_mem;
 
-            impure function read_mem(bank : in Bank_Ptr_T; row : in Row_Ptr_T; col : in Col_Ptr_T; dqm : in std_logic_vector(1 downto 0)) return Data_T is
-                variable tmpData : Data_T := (others => '0');
+            impure function read_mem(bank : in Bank_Ptr_T; row : in Row_Ptr_T; col : in Col_Ptr_T) return Data_T is
             begin
-                --                Log(SDRAM_ALERT_ID, "Reading from Bank: " & to_string(bank) & ", Row: " & to_string(row) & ", Col: " & to_string(col) & ", Dqm: " & to_bstring(dqm), DEBUG);
+                Log(SDRAM_ALERT_ID, "Reading from Bank: " & to_string(bank) & ", Row: " & to_string(row) & ", Col: " & to_string(col), DEBUG);
 
                 if bankData(bank)(row) = NULL then
-                    tmpData := (others => '0');
+                    return (others => '0');
                 else
-                    tmpData := to_slv(bankData(bank)(row)(col));
+                    return to_slv(bankData(bank)(row)(col));
                 end if;
-
-                for i in dqm'range loop
-                    -- mask data according to dqm
-                    -- if mask bit is low, allow writing to target byte
-                    if dqm(i) = '0' then
-                        tmpData(((i + 1) * 8) - 1 downto i * 8) := tmpData(((i + 1) * 8) - 1 downto i * 8);
-                    end if;
-                end loop;
-
-                return tmpData;
             end function read_mem;
 
             -- tmp
@@ -456,7 +451,7 @@ begin
                     bankPtr := to_safe_natural(inputReg.bank);
                     addrPtr := to_safe_natural(inputReg.addr);
                     a10Flag := logic_to_bool(inputReg.addr(10));
-                    data    := inputReg.data;
+                    data    := dataInPipeline(0).data;
 
                     -- set additional state flags
                     isPrechargingAll := true;
@@ -467,19 +462,18 @@ begin
                     end loop;
 
                     -- increment dataOutPipeline shift register
-                    dataOutPipeline(0 to 8) <= dataOutPipeline(1 to 9);
-                    dataOutPipeline(9)      <= (others => 'Z');
+                    dataOutPipeline(0 to 2) <= dataOutPipeline(1 to 3);
+                    dataOutPipeline(3)      <= (others => 'Z');
 
                     -- TODO: implement single location Write option + Auto Precharge + tRDL
                     -- TODO: might be best to re-architecture
                     -- resolve scheduled Read(s)/Write(s)
                     if ctrl.state = ReadBurst or ctrl.state = WriteBurst then
-                        if ctrl.state = ReadBurst then
-                            -- FIXME: CL latency
+                        if ctrl.state = ReadBurst and inputReg.cmd /= BurstTerminate then
                             -- FIXME: add hold and setup time requirements
-                            dataOutPipeline(latencyMode - 2) <= read_mem(ctrl.currBank, banks(ctrl.currBank).row, get_curr_col, inputReg.dqm);
-                        else
-                            write_mem(ctrl.currBank, banks(ctrl.currBank).row, get_curr_col, inputReg.data, inputReg.dqm);
+                            dataOutPipeline(latencyMode - 2) <= read_mem(ctrl.currBank, banks(ctrl.currBank).row, get_curr_col);
+                        elsif ctrl.state = WriteBurst then
+                            write_mem(ctrl.currBank, banks(ctrl.currBank).row, get_curr_col, dataInPipeline(1).data, dataInPipeline(1).dqm);
                         end if;
                     end if;
 
@@ -495,8 +489,8 @@ begin
                         -- if write burst is disabled, only write to one location
                         if ctrl.state = WriteBurst and writeBurstMode = SingleLocation then
                             ctrl.state <= Idle;
-                        elsif burstCounter = burstLength - 1 then
-                            -- FullPage burst mode wraps around (only ends after user cmd)
+                        elsif burstCounter = burstLength then
+                            -- FullPage burst mode wraps around (only ends after user cancellation)
                             if burstLength = PAGE_LEN then
                                 burstCounter := 0;
                             else
@@ -549,7 +543,9 @@ begin
                             burstCounter := 0;
 
                             -- immediately output read data
-                            dataOutPipeline(latencyMode - 2) <= read_mem(bankPtr, banks(bankPtr).row, get_curr_col, inputReg.dqm);
+                            dataOutPipeline(latencyMode - 2) <= read_mem(bankPtr, banks(bankPtr).row, get_curr_col);
+
+                            burstCounter := 1;
 
                         when Write =>
                             assert ctrl.state /= AccessingModeReg
@@ -574,8 +570,8 @@ begin
                             currCol      := addrPtr;
                             burstCounter := 0;
 
-                            -- immediately write input data
-                            write_mem(bankPtr, banks(bankPtr).row, get_curr_col, inputReg.data, inputReg.dqm);
+                        -- immediately write input data
+                        --                            write_mem(bankPtr, banks(bankPtr).row, get_curr_col, inputReg.data, inputReg.dqm);
 
                         when BurstTerminate =>
                             assert ctrl.state = WriteBurst or ctrl.state = ReadBurst
@@ -623,7 +619,7 @@ begin
                             report "Invalid Mode Register value on data input, cannot Load Mode Register"
                             severity error;
 
-                            Log(SDRAM_ALERT_ID, "Received Load Mode Register command with payload: 0x" & to_hstring(inputReg.data), INFO);
+                            Log(SDRAM_ALERT_ID, "Received Load Mode Register command with payload: 0x" & to_hstring(data), INFO);
 
                             ctrl.state <= AccessingModeReg;
                             modeReg    <= data;
@@ -645,7 +641,7 @@ begin
             end loop;
 
             if DUMP_TO_FILE and simEndedIn then
-                report "Dumping (sparse) memory to file, please wait..." severity note;
+                Log(SDRAM_ALERT_ID, "Dumping (sparse) memory to file: """ & OUTPUT_FILE_NAME & """, please wait ...", INFO);
                 file_open(outputFile, OUTPUT_FILE_NAME, write_mode);
 
                 write(outputLine, BANK_COUNT);
@@ -721,14 +717,14 @@ begin
 
                     when Refresh =>
                         if inputReg.cmd = Refresh then
-                            if counter = 0 then
-                                currState := SetModeReg;
-                            else
-                                counter := counter - 1;
-                            end if;
+                            counter := counter - 1;
                         elsif inputReg.cmd /= NoOp and inputReg.cmd /= CmdInhibit then
-                            report "Didn't receive a Refresh command 4096*2 times after Precharge all during initialization"
+                            report "Didn't receive a Refresh command atleast 4096*2 times after Precharge all during initialization"
                             severity error;
+                        end if;
+
+                        if counter = 0 then
+                            currState := SetModeReg;
                         end if;
 
                     when SetModeReg =>
