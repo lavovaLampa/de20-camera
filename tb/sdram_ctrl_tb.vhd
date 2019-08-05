@@ -38,7 +38,6 @@ architecture tb of sdram_ctrl_tb is
     signal dataOut      : Data_T;
 
     -- SDRAM I/O
-    signal sdramClkOut : std_logic;
     signal sdramDataIo : Data_T;
     signal sdramOut    : Mem_IO_R;
 
@@ -70,7 +69,6 @@ begin
             dataReadyOut => dataReadyOut,
             dataIn       => dataIn,
             dataOut      => dataOut,
-            sdramClkOut  => sdramClkOut,
             sdramDataIo  => sdramDataIo,
             sdramOut     => sdramOut,
             clkStableIn  => clkStable

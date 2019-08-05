@@ -1,10 +1,14 @@
 library ieee;
 use ieee.std_logic_1164.all;
 use ieee.numeric_std.all;
+
 use std.textio.all;
+
 use work.ccd_ctrl_pkg.all;
-use work.common_pkg.all;
+use work.ccd_pkg.all;
 use work.ccd_ctrl;
+use work.img_pkg.Pixel_Aggregate_T;
+use work.img_pkg.Pixel_Color_T;
 
 entity ccd_ctrl_tb is
     constant CLK_PERIOD       : time    := 20 ns; -- 50 MHz clock
@@ -17,7 +21,7 @@ architecture test of ccd_ctrl_tb is
     signal clkIn, rstAsyncIn          : std_logic        := '0';
     signal frameValid, lineValid      : std_logic        := '0';
     signal pixelData                  : CCD_Pixel_Data_T := X"000";
-    signal pixelOut                   : Pixel_Aggregate;
+    signal pixelOut                   : Pixel_Aggregate_T;
     signal pixelValidOut, frameEndOut : boolean;
 
     signal nRstAsync, pixClk : std_logic;
@@ -48,10 +52,10 @@ begin
 
     ccdModel : entity work.ccd_model
         generic map(
-            INIT_HEIGHT       => IMG_HEIGHT,
-            INIT_WIDTH        => IMG_WIDTH,
-            INIT_HEIGHT_START => IMG_CONSTS.height_start,
-            INIT_WIDTH_START  => IMG_CONSTS.width_start,
+            INIT_HEIGHT       => CCD_WIDTH,
+            INIT_WIDTH        => CCD_HEIGHT,
+            INIT_HEIGHT_START => CCD_PROPERTIES.height_start,
+            INIT_WIDTH_START  => CCD_PROPERTIES.width_start,
             DEBUG             => true
         )
         port map(
@@ -97,8 +101,8 @@ begin
 
     checkProc : process(clkIn, rstAsyncIn)
         type Integer_Pixel_Matrix is array (2 downto 0, 2 downto 0) of natural;
-        constant NEW_HEIGHT                      : Img_Height_Range  := IMG_HEIGHT - 2;
-        constant NEW_WIDTH                       : Img_Width_Range   := IMG_WIDTH - 2;
+        constant NEW_HEIGHT                      : Ccd_Height_Ptr_T  := CCD_WIDTH - 2;
+        constant NEW_WIDTH                       : Ccd_Width_Ptr_T   := CCD_HEIGHT - 2;
         variable currColor                       : CCD_Pixel_Color_T := Green1;
         variable redColor, greenColor, blueColor : natural;
         variable arrayX, arrayY, pixelCount      : natural           := 0;

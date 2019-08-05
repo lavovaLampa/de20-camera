@@ -19,11 +19,11 @@ entity sdram_ctrl_top is
         -- 13              2 1          0
         addrIn                    : in    Ctrl_Addr_T;
         cmdIn                     : in    Ctrl_Cmd_T;
-        cmdReadyOut, dataReadyOut : out   boolean;
+        cmdReadyOut               : out   boolean;
+        dataReadyOut, nextDataOut : out   boolean;
         dataIn                    : in    Data_T;
         dataOut                   : out   Data_T;
         -- SDRAM I/O
-        sdramClkOut               : out   std_logic;
         sdramDataIo               : inout Data_T;
         sdramOut                  : out   Mem_IO_R;
         clkStableIn               : in    std_logic
@@ -41,15 +41,12 @@ architecture RTL of sdram_ctrl_top is
     signal ctrlMemOut    : Mem_IO_R;
     signal ctrlMemDataIo : Data_T;
 begin
-    -- TODO: no clock customization necessary?
-    sdramClkOut <= clkIn;
-
     -- if initialized let the controller communicate with the sdram
     with memInitialized select sdramOut <=
         ctrlMemOut when true,
         initMemOut when false;
 
---    ctrlMemDataIo <= sdramDataIo;
+    --    ctrlMemDataIo <= sdramDataIo;
 
     -- same with sdram data
     with memInitialized select sdramDataIo <=
@@ -71,6 +68,7 @@ begin
             cmdIn            => cmdIn,
             cmdReadyOut      => cmdReadyOut,
             dataReadyOut     => dataReadyOut,
+            nextDataOut      => nextDataOut,
             dataIn           => dataIn,
             dataOut          => dataOut,
             memInitializedIn => memInitialized,

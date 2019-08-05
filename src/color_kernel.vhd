@@ -1,8 +1,12 @@
 library ieee;
 use ieee.std_logic_1164.all;
 use ieee.numeric_std.all;
-use work.common_pkg.all;
+
 use work.kernel_pkg.all;
+use work.img_pkg.Pixel_Aggregate_T;
+use work.img_pkg.Pixel_Color_T;
+use work.img_pkg.PIXEL_WIDTH;
+use work.img_pkg.Pixel_Data_T;
 
 entity color_kernel is
     generic(
@@ -16,9 +20,11 @@ entity color_kernel is
     );
     port(
         clkIn, rstAsyncIn        : in  std_logic;
-        pixelIn                  : in  Pixel_Aggregate;
+        -- input
+        pixelIn                  : in  Pixel_Aggregate_T;
         newPixelIn, frameEndIn   : in  boolean;
-        pixelOut                 : out Pixel_Aggregate;
+        -- output
+        pixelOut                 : out Pixel_Aggregate_T;
         newPixelOut, frameEndOut : out boolean
     );
 end entity color_kernel;
@@ -27,9 +33,9 @@ architecture RTL of color_kernel is
     -- pixel shift register OUTPUT
     signal pixelMatrix : Matrix_Aggregate := (others => (others => (others => X"00"))); -- that's a lOOOOng initialization
 
-    signal pixelCounter    : Pixel_Count_Range := 0;
-    signal currShiftWidth  : Img_Width_Range   := 0;
-    signal currShiftHeight : Img_Height_Range  := 0;
+    signal pixelCounter    : Pixel_Ptr_T      := 0;
+    signal currShiftWidth  : Img_Width_Ptr_T  := 0;
+    signal currShiftHeight : Img_Height_Ptr_T := 0;
 
     signal pixelInBuffer : boolean := false;
 
@@ -88,7 +94,7 @@ begin
         variable mulAcc, leftMulAcc, rightMulAcc : signed(13 downto 0);
     begin
         if rstAsyncIn = '1' then
-            for currColor in Pixel_Color loop
+            for currColor in Pixel_Color_T loop
                 for i in 0 to STAGE1_AMOUNT - 1 loop
                     stage1Out(currColor)(i) <= (others => '0');
                 end loop;
@@ -101,7 +107,7 @@ begin
             stage1FrameEnd <= isFrameEnd;
 
             if not isImageEdge and newPixelIn then
-                for currColor in Pixel_Color loop
+                for currColor in Pixel_Color_T loop
                     --                    report "Current color: " & Pixel_Color'image(currColor);
                     for i in 0 to STAGE1_AMOUNT - 2 loop
                         leftY  := i / 3;
@@ -109,8 +115,8 @@ begin
                         leftX  := i mod 3;
                         rightX := (8 - i) mod 3;
 
-                        leftMulAcc  := signed(resize(pixelMatrix(currColor)(leftY, leftX), PIXEL_SIZE + 1)) * to_signed(kernelParams(leftY, leftX), 5);
-                        rightMulAcc := signed(resize(pixelMatrix(currColor)(rightY, rightX), PIXEL_SIZE + 1)) * to_signed(kernelParams(rightY, rightX), 5);
+                        leftMulAcc  := signed(resize(pixelMatrix(currColor)(leftY, leftX), PIXEL_WIDTH + 1)) * to_signed(kernelParams(leftY, leftX), 5);
+                        rightMulAcc := signed(resize(pixelMatrix(currColor)(rightY, rightX), PIXEL_WIDTH + 1)) * to_signed(kernelParams(rightY, rightX), 5);
 
                         stage1Out(currColor)(i) <= resize(leftMulAcc, PIPELINE_SIZE) + resize(rightMulAcc, PIPELINE_SIZE);
                     end loop;
@@ -125,7 +131,7 @@ begin
     convStage2 : process(clkIn, rstAsyncIn)
     begin
         if rstAsyncIn = '1' then
-            for currColor in Pixel_Color loop
+            for currColor in Pixel_Color_T loop
                 for i in 0 to STAGE2_AMOUNT - 1 loop
                     stage2Out(currColor)(i) <= (others => '0');
                 end loop;
@@ -138,7 +144,7 @@ begin
             stage2FrameEnd <= stage1FrameEnd;
 
             if stage1Ready then
-                for currColor in Pixel_Color loop
+                for currColor in Pixel_Color_T loop
                     for i in 0 to STAGE2_AMOUNT - 2 loop
                         stage2Out(currColor)(i) <= stage1Out(currColor)(i) + stage1Out(currColor)(STAGE1_AMOUNT - 1 - i);
                     end loop;
@@ -151,7 +157,7 @@ begin
     convStage3 : process(clkIn, rstAsyncIn)
     begin
         if rstAsyncIn = '1' then
-            for currColor in Pixel_Color loop
+            for currColor in Pixel_Color_T loop
                 for i in 0 to STAGE3_AMOUNT - 1 loop
                     stage3Out(currColor)(i) <= (others => '0');
                 end loop;
@@ -164,7 +170,7 @@ begin
             stage3FrameEnd <= stage2FrameEnd;
 
             if stage2Ready then
-                for currColor in Pixel_Color loop
+                for currColor in Pixel_Color_T loop
                     for i in 0 to STAGE3_AMOUNT - 2 loop
                         stage3Out(currColor)(i) <= stage2Out(currColor)(i) + stage2Out(currColor)(STAGE2_AMOUNT - 1 - i);
                     end loop;
@@ -176,10 +182,10 @@ begin
 
     convStage4 : process(clkIn, rstAsyncIn)
         variable tmp         : Pipeline_Pixel := (others => '0');
-        variable tmpUnsigned : Pixel_Data     := X"00";
+        variable tmpUnsigned : Pixel_Data_T   := X"00";
     begin
         if rstAsyncIn = '1' then
-            for currColor in Pixel_Color loop
+            for currColor in Pixel_Color_T loop
                 pixelOut(currColor) <= X"00";
             end loop;
             newPixelOut <= false;
@@ -190,10 +196,10 @@ begin
             frameEndOut <= stage3FrameEnd;
 
             if stage3Ready then
-                for currColor in Pixel_Color loop
+                for currColor in Pixel_Color_T loop
                     tmp         := stage3Out(currColor)(0) + stage3Out(currColor)(1);
                     tmp         := tmp / (2 ** prescaleAmount);
-                    tmpUnsigned := toSaturatedUnsigned(tmp, IMG_CONSTS.pixel_size);
+                    tmpUnsigned := toSaturatedUnsigned(tmp, PIXEL_WIDTH);
 
                     -- convert back to unsigned, we can be sure the number is correct unsigned value because of IF block
                     pixelOut(currColor) <= tmpUnsigned;

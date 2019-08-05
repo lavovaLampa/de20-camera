@@ -1,18 +1,18 @@
 library ieee;
 use ieee.std_logic_1164.all;
 use ieee.numeric_std.all;
-use work.i2c_pkg.I2C_Addr;
-use work.i2c_pkg.I2C_Data;
 
-package common_pkg is
-    type CCD_Properties_R is record
+use work.i2c_pkg.all;
+
+package ccd_pkg is
+    type CCD_Constants_R is record
         width    : positive;
         height   : positive;
         -- length of pixel data vector
         data_len : positive;
-    end record CCD_Properties_R;
+    end record CCD_Constants_R;
 
-    constant CCD_CONSTS : CCD_Properties_R := (
+    constant CCD_CONSTS : CCD_Constants_R := (
         width    => 2752,
         height   => 2002,
         data_len => 12
@@ -48,9 +48,9 @@ package common_pkg is
         dark2     => (2001, 2001)
     );
 
-    subtype CCD_Width_Range is natural range 0 to CCD_CONSTS.width - 1;
-    subtype CCD_Height_Range is natural range 0 to CCD_CONSTS.height - 1;
-    subtype CCD_Pixel_Count_Range is natural range 0 to CCD_CONSTS.width * CCD_CONSTS.height;
+    subtype Ccd_Width_Ptr_T is natural range 0 to CCD_CONSTS.width - 1;
+    subtype Ccd_Height_Ptr_T is natural range 0 to CCD_CONSTS.height - 1;
+    subtype Ccd_Pixel_Ptr_T is natural range 0 to CCD_CONSTS.width * CCD_CONSTS.height - 1;
 
     type ROM_Data is record
         addr : I2C_Addr;
@@ -61,19 +61,17 @@ package common_pkg is
 
     pure function valToConfig(val : natural) return I2C_Data;
 
-    type Img_Properties_R is record
+    type Ccd_Properties_R is record
         -- the X coordinate of the upper-left corner of FOV -> EVEN (rounded down)
-        width_start   : CCD_Width_Range;
+        width_start   : Ccd_Width_Ptr_T;
         -- the Y coordinate of the upper-left corner of FOV -> EVEN (rounded down)
-        height_start  : CCD_Height_Range;
+        height_start  : Ccd_Height_Ptr_T;
         -- height of the FOV - 1 -> ODD (rounded up)
-        height        : CCD_Height_Range;
+        height        : Ccd_Height_Ptr_T;
         -- width of the FOV - 1 -> ODD (rounded up)
-        width         : CCD_Width_Range;
+        width         : Ccd_Width_Ptr_T;
         -- is chip outputting pixels mirrored
         is_mirrored   : boolean;
-        -- how much pixel data do we really use/need
-        pixel_size    : positive;
         -- number of PIXCLKs
         hblank        : natural;
         -- number of lines
@@ -82,7 +80,7 @@ package common_pkg is
         shutter_width : natural;
         -- whether to show debug test pattern
         test_pattern  : boolean;
-    end record Img_Properties_R;
+    end record Ccd_Properties_R;
 
     --    constant IMG_CONSTS : Image_Properties := (
     --        width_start     => 1053,
@@ -93,19 +91,21 @@ package common_pkg is
     --        pixel_data_size => 8
     --    );
 
-    constant IMG_CONSTS : Img_Properties_R := (
+    constant CCD_PROPERTIES : Ccd_Properties_R := (
         width_start   => 990,
         height_start  => 838,
         height        => 484,
         width         => 644,
         is_mirrored   => false,
-        pixel_size    => 8,
-        hblank        => 768,
-        vblank        => 8,
-        -- FIXME: nespravna hodnota (0x7970)
+        hblank        => 1023,
+        vblank        => 130,
+        -- FIXME: write correct value
         shutter_width => 0,
         test_pattern  => true
     );
+
+    alias CCD_HEIGHT is CCD_PROPERTIES.width;
+    alias CCD_WIDTH is CCD_PROPERTIES.height;
 
     constant MIRROR_SWITCH       : Switch_T := (true => X"C040", false => X"0040");
     constant TEST_PATTERN_SWITCH : Switch_T := (true => X"0001", false => X"0000");
@@ -113,23 +113,23 @@ package common_pkg is
     -- data to send to ccd chip in format (reg_addr, reg_data) [8b, 16b]
     constant CCD_CONFIG : Configuration_Array_T := (
         -- row start (Y coordinate of upper left FOV corner)
-        (X"01", valToConfig(IMG_CONSTS.height_start)),
+        (X"01", valToConfig(CCD_PROPERTIES.height_start)),
         -- column start (X coordinate of upper left FOV corner)
-        (X"02", valToConfig(IMG_CONSTS.width_start)),
+        (X"02", valToConfig(CCD_PROPERTIES.width_start)),
         -- height of FOV
-        (X"03", valToConfig(IMG_CONSTS.height - 1)),
+        (X"03", valToConfig(CCD_PROPERTIES.height - 1)),
         -- width of FOV
-        (X"04", valToConfig(IMG_CONSTS.width - 1)),
+        (X"04", valToConfig(CCD_PROPERTIES.width - 1)),
         -- hblank (num. of PIXCLKs)
-        (X"05", valToConfig(IMG_CONSTS.hblank)),
+        (X"05", valToConfig(CCD_PROPERTIES.hblank)),
         -- vblank (num. of PIXCLKs)
-        (X"06", valToConfig(IMG_CONSTS.vblank)),
+        (X"06", valToConfig(CCD_PROPERTIES.vblank)),
         -- set shutter width
-        (X"09", valToConfig(IMG_CONSTS.shutter_width)),
+        (X"09", valToConfig(CCD_PROPERTIES.shutter_width)),
         -- invert pixel clock
         (X"0A", X"8000"),
         -- enable row & column mirroring
-        (X"20", MIRROR_SWITCH(IMG_CONSTS.is_mirrored)),
+        (X"20", MIRROR_SWITCH(CCD_PROPERTIES.is_mirrored)),
         -- row address mode (binning, skipping) [NO BIN, NO SKIP]
         (X"22", X"0000"),
         -- column address mode (binning, skipping) [NO BIN, NO SKIP]
@@ -144,7 +144,7 @@ package common_pkg is
         (X"2E", X"000B"),
         -- TEST PATTERNS
         -- test pattern control (on/off + type of pattern)
-        (X"A0", TEST_PATTERN_SWITCH(IMG_CONSTS.test_pattern)),
+        (X"A0", TEST_PATTERN_SWITCH(CCD_PROPERTIES.test_pattern)),
         -- test pattern green intensity
         (X"A1", X"00FF"),
         -- test pattern red intensity
@@ -155,27 +155,54 @@ package common_pkg is
         (X"A4", X"0000")
     );
 
-    subtype Img_Height_Range is natural range 0 to IMG_CONSTS.height - 1;
-    subtype Img_Width_Range is natural range 0 to IMG_CONSTS.width - 1;
-
     -- CCD TYPES
     subtype CCD_Pixel_Data_T is std_logic_vector((CCD_CONSTS.data_len - 1) downto 0);
     -- ccd has bayer color mask (2 * green pixel)
     type CCD_Pixel_Color_T is (Red, Green1, Green2, Blue);
-    type CCD_Matrix_T is array (Img_Height_Range, Img_Width_Range) of CCD_Pixel_Data_T;
+    --    type CCD_Matrix_T is array (Img_Height_Ptr_T, Img_Width_Ptr_T) of CCD_Pixel_Data_T;
     type CCD_Pixel_Type is (Dark, Boundary, Active, Hsync, Vsync);
 
     -- COMMON INTERNAL TYPES
-    subtype Pixel_Data is unsigned((IMG_CONSTS.pixel_size - 1) downto 0);
-    subtype Pixel_Count_Range is natural range 0 to (IMG_CONSTS.width * IMG_CONSTS.height);
-    type Pixel_Color is (Red, Green, Blue);
-    type Pixel_Aggregate is array (Pixel_Color) of Pixel_Data;
-    type Pixel_Matrix is array (2 downto 0, 2 downto 0) of Pixel_Data;
 
     pure function getCcdPixelType(absoluteHeight : natural; absoluteWidth : natural) return CCD_Pixel_Type;
-end package common_pkg;
+    pure function getCurrColor(height : Ccd_Height_Ptr_T; width : Ccd_Width_Ptr_T) return CCD_Pixel_Color_T;
+end package ccd_pkg;
 
-package body common_pkg is
+package body ccd_pkg is
+    pure function decodeColor(isEvenRow : boolean; isEvenColumn : boolean) return CCD_Pixel_Color_T is
+    begin
+        if isEvenColumn then
+            if isEvenRow then
+                return Green1;
+            else
+                return Blue;
+            end if;
+        else
+            if isEvenRow then
+                return Red;
+            else
+                return Green2;
+            end if;
+        end if;
+    end function decodeColor;
+
+    pure function currColorAbsolute(currHeight : Ccd_Height_Ptr_T; currWidth : Ccd_Width_Ptr_T; isMirrored : boolean) return CCD_Pixel_Color_T is
+        variable isEvenRow    : boolean := currHeight mod 2 = 0;
+        variable isEvenColumn : boolean := currWidth mod 2 = 0;
+    begin
+        if isMirrored then
+            return decodeColor(not isEvenRow, not isEvenColumn);
+        else
+            return decodeColor(isEvenRow, isEvenColumn);
+        end if;
+    end function currColorAbsolute;
+
+    pure function getCurrColor(height : Ccd_Height_Ptr_T; width : Ccd_Width_Ptr_T) return CCD_Pixel_Color_T is
+        variable absoluteWidth  : Ccd_Width_Ptr_T  := CCD_PROPERTIES.width_start + width;
+        variable absoluteHeight : Ccd_Height_Ptr_T := CCD_PROPERTIES.height_start + height;
+    begin
+        return currColorAbsolute(absoluteHeight, absoluteWidth, CCD_PROPERTIES.is_mirrored);
+    end function getCurrColor;
 
     pure function valToConfig(val : natural)
     return I2C_Data is
@@ -238,4 +265,4 @@ package body common_pkg is
         end if;
     end function getCcdPixelType;
 
-end package body common_pkg;
+end package body ccd_pkg;

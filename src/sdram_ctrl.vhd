@@ -106,9 +106,7 @@ begin
 
         -- start a burst and setup burst state
         procedure burst_start(burstType : in Burst_Op_T) is
-            variable interleavedRead : boolean :=
-                (burstType = Read and (bursting and burstState.burstType = Read and burstState.counter = 0)) or 
-                (burstType = Write and burstState.burstType = Read and burstState.counter = -tCAS);
+            variable interleavedRead : boolean := (burstType = Read and (bursting and burstState.burstType = Read and burstState.counter = 0)) or (burstType = Write and burstState.burstType = Read and burstState.counter = -tCAS);
         begin
             case burstType is
                 when Read =>

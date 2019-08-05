@@ -84,19 +84,17 @@ entity fifo_ic_got is
     );
     port(
         -- Write Interface
-        clk_wr    : in  std_logic;
-        rst_wr    : in  std_logic;
-        put       : in  std_logic;
-        din       : in  std_logic_vector(D_BITS - 1 downto 0);
-        full      : out std_logic;
-        estate_wr : out std_logic_vector(imax(ESTATE_WR_BITS - 1, 0) downto 0);
+        clk_wr, rst_wr : in  std_logic;
+        put            : in  std_logic;
+        dataIn         : in  std_logic_vector(D_BITS - 1 downto 0);
+        full           : out std_logic;
+        estate_wr      : out unsigned(imax(ESTATE_WR_BITS - 1, 0) downto 0);
         -- Read Interface
-        clk_rd    : in  std_logic;
-        rst_rd    : in  std_logic;
-        got       : in  std_logic;
-        valid     : out std_logic;
-        dout      : out std_logic_vector(D_BITS - 1 downto 0);
-        fstate_rd : out std_logic_vector(imax(FSTATE_RD_BITS - 1, 0) downto 0)
+        clk_rd, rst_rd : in  std_logic;
+        got            : in  std_logic;
+        valid          : out std_logic;
+        dataOut        : out std_logic_vector(D_BITS - 1 downto 0);
+        fstate_rd      : out unsigned(imax(FSTATE_RD_BITS - 1, 0) downto 0)
     );
 end entity fifo_ic_got;
 
@@ -189,7 +187,7 @@ begin
     puti <= put and not Ful;
     full <= Ful;
 
-    di <= din;
+    di <= dataIn;
     wa <= unsigned(IP0(A_BITS - 1 downto 0));
 
     -----------------------------------------------------------------------------
@@ -256,9 +254,9 @@ begin
     -- register in that case.
     -----------------------------------------------------------------------------
     genRegN : if DATA_REG or not OUTPUT_REG generate
-        goti  <= got;
-        dout  <= do;
-        valid <= Vld;
+        goti    <= got;
+        dataOut <= do;
+        valid   <= Vld;
     end generate genRegN;
     genRegY : if (not DATA_REG) and OUTPUT_REG generate
         signal Buf  : std_logic_vector(D_BITS - 1 downto 0) := (others => '-');
@@ -276,9 +274,9 @@ begin
                 end if;
             end if;
         end process;
-        goti  <= not VldB or got;
-        dout  <= Buf;
-        valid <= VldB;
+        goti    <= not VldB or got;
+        dataOut <= Buf;
+        valid   <= VldB;
     end generate genRegY;
 
     -----------------------------------------------------------------------------
@@ -289,7 +287,7 @@ begin
         signal d : unsigned(A_BITS - 1 downto 0);
     begin
         d         <= unsigned(gray2bin(OPc(A_BITS - 1 downto 0))) + not unsigned(gray2bin(IP0(A_BITS - 1 downto 0)));
-        estate_wr <= (others => '0') when Ful = '1' else std_logic_vector(d(d'left downto d'left - ESTATE_WR_BITS + 1));
+        estate_wr <= (others => '0') when Ful = '1' else unsigned(d(d'left downto d'left - ESTATE_WR_BITS + 1));
     end generate gEstateWr;
     gNoEstateWr : if ESTATE_WR_BITS = 0 generate
         estate_wr <= "X";
@@ -300,7 +298,7 @@ begin
         signal d : unsigned(A_BITS - 1 downto 0);
     begin
         d         <= unsigned(gray2bin(IPc(A_BITS - 1 downto 0))) + not unsigned(gray2bin(OP0(A_BITS - 1 downto 0)));
-        fstate_rd <= (others => '0') when Avl = '0' else std_logic_vector(d(d'left downto d'left - FSTATE_RD_BITS + 1));
+        fstate_rd <= (others => '0') when Avl = '0' else unsigned(d(d'left downto d'left - FSTATE_RD_BITS + 1));
     end generate gFstateRd;
     gNoFstateRd : if FSTATE_RD_BITS = 0 generate
         fstate_rd <= "X";

@@ -1,9 +1,14 @@
 library ieee;
 use ieee.std_logic_1164.all;
 use ieee.numeric_std.all;
-use work.common_pkg.all;
+
+use work.ccd_pkg.all;
 use work.kernel_pkg.all;
 use work.color_kernel;
+use work.img_pkg.Pixel_Aggregate_T;
+use work.img_pkg.Pixel_Data_T;
+use work.img_pkg.Pixel_Color_T;
+use work.img_pkg.PIXEL_WIDTH;
 
 entity color_kernel_tb is
     constant TEST_KERNEL      : Convolution_Params   := (
@@ -16,17 +21,17 @@ entity color_kernel_tb is
 
     -- 50 MHz
     constant CLK_PERIOD : time := 20 ns; -- EDIT Put right period here
-    type Image_Accumulator is array (0 to IMG_HEIGHT - 1, 0 to IMG_WIDTH - 1) of Pixel_Aggregate;
+    type Image_Accumulator is array (0 to IMG_HEIGHT - 1, 0 to IMG_WIDTH - 1) of Pixel_Aggregate_T;
 end color_kernel_tb;
 
 architecture tb of color_kernel_tb is
     -- WRITE-ONLY
     signal clkIn, rstAsyncIn      : std_logic;
-    signal pixelIn                : Pixel_Aggregate;
+    signal pixelIn                : Pixel_Aggregate_T;
     signal newPixelIn, frameEndIn : boolean;
 
     -- READ-ONLY
-    signal pixelOut    : Pixel_Aggregate;
+    signal pixelOut    : Pixel_Aggregate_T;
     signal newPixelOut : boolean;
     signal frameEndOut : boolean;
 
@@ -60,7 +65,7 @@ begin
         );
 
     stimuli : process
-        variable tmpPixel : Pixel_Data := X"00";
+        variable tmpPixel : Pixel_Data_T := X"00";
     begin
         pixelIn    <= (others => X"00");
         newPixelIn <= false;
@@ -79,7 +84,7 @@ begin
                     wait until rising_edge(clkIn);
                     newPixelIn <= true;
                     tmpPixel   := to_unsigned(x, 8);
-                    for currColor in Pixel_Color loop
+                    for currColor in Pixel_Color_T loop
                         imgArray(y, x)(currColor) <= tmpPixel;
                         pixelIn(currColor)        <= tmpPixel;
                     end loop;
@@ -104,12 +109,12 @@ begin
         constant OUTPUT_WIDTH  : natural := IMG_WIDTH - 2;
         constant OUTPUT_HEIGHT : natural := IMG_HEIGHT - 2;
 
-        variable currWidth, arrayWidth   : Img_Width_Range     := 0;
-        variable currHeight, arrayHeight : Img_Height_Range    := 0;
+        variable currWidth, arrayWidth   : Img_Width_Ptr_T     := 0;
+        variable currHeight, arrayHeight : Img_Height_Ptr_T    := 0;
         variable pixelAcc                : Pipeline_Pixel      := (others => '0');
         variable mulAcc                  : signed(13 downto 0) := (others => '0');
         variable pixelCounter            : natural             := 0;
-        variable tmpPixel                : Pixel_Data          := X"00";
+        variable tmpPixel                : Pixel_Data_T        := X"00";
     begin
         if rstAsyncIn = '1' then
             pixelCounter := 0;
@@ -122,16 +127,16 @@ begin
                 arrayHeight  := currHeight + 1;
 
                 --                report "Array Height, Width: " & natural'image(arrayHeight) & ", " & natural'image(arrayWidth);
-                for currColor in Pixel_Color loop
+                for currColor in Pixel_Color_T loop
                     pixelAcc := (others => '0');
                     for y in 0 to 2 loop
                         for x in 0 to 2 loop
-                            mulAcc   := signed(resize(imgArray(arrayHeight + y - 1, arrayWidth + x - 1)(currColor), PIXEL_SIZE + 1)) * to_signed(TEST_KERNEL(y, x), 5);
+                            mulAcc   := signed(resize(imgArray(arrayHeight + y - 1, arrayWidth + x - 1)(currColor), PIXEL_WIDTH + 1)) * to_signed(TEST_KERNEL(y, x), 5);
                             pixelAcc := pixelAcc + resize(mulAcc, PIPELINE_SIZE);
                         end loop;
                     end loop;
                     pixelAcc := pixelAcc / (2 ** TEST_PRESCALE);
-                    tmpPixel := toSaturatedUnsigned(pixelAcc, IMG_CONSTS.pixel_size);
+                    tmpPixel := toSaturatedUnsigned(pixelAcc, PIXEL_WIDTH);
 
                     assert tmpPixel = pixelOut(currColor) report "Received wrong pixel value" & LF &
                     "Expected: " & integer'image(to_integer(tmpPixel)) & LF &

@@ -1,17 +1,17 @@
 library ieee;
 use ieee.std_logic_1164.all;
 use ieee.numeric_std.all;
+
 use work.ccd_model_pkg.all;
-use work.common_pkg.all;
+use work.ccd_pkg.all;
 use work.i2c_pkg.all;
-use work.ccd_ctrl_pkg.getCurrColor;
 
 entity ccd_model is
     generic(
-        INIT_HEIGHT       : CCD_Height_Range := 484;
-        INIT_WIDTH        : CCD_Width_Range  := 644;
-        INIT_HEIGHT_START : CCD_Height_Range := ROW_START_DEFAULT;
-        INIT_WIDTH_START  : CCD_Width_Range  := COL_START_DEFAULT;
+        INIT_HEIGHT       : Ccd_Height_Ptr_T := 484;
+        INIT_WIDTH        : Ccd_Width_Ptr_T  := 644;
+        INIT_HEIGHT_START : Ccd_Height_Ptr_T := ROW_START_DEFAULT;
+        INIT_WIDTH_START  : Ccd_Width_Ptr_T  := COL_START_DEFAULT;
         DEBUG             : boolean          := false
     );
     port(
@@ -24,7 +24,7 @@ entity ccd_model is
         sClkIn                        : in    std_logic;
         sDataIO                       : inout std_logic;
         -- DEBUG
-        ccdArrayIn                    : in    CCD_Matrix_T;
+        ccdArrayIn                    : in    Ccd_Matrix_T;
         frameDoneOut, configUpdateOut : out   boolean
     );
 
@@ -66,9 +66,9 @@ begin
         subtype Temp_Width_Range is natural range 0 to 6846;
         subtype Temp_Height_Range is natural range 0 to 4048;
 
-        variable currWidth  : Temp_Width_Range      := 0; -- absolute
-        variable currHeight : Temp_Height_Range     := 0; -- absolute
-        variable debugCount : CCD_Pixel_Count_Range := 0;
+        variable currWidth  : Temp_Width_Range  := 0; -- absolute
+        variable currHeight : Temp_Height_Range := 0; -- absolute
+        variable debugCount : Ccd_Pixel_Ptr_T         := 0;
 
         impure function getPixelOut(height : Temp_Height_Range; width : Temp_Width_Range) return CCD_Pixel_Data_T is
             constant pixelType : CCD_Pixel_Type := getCcdPixelType(height, width);

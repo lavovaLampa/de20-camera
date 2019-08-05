@@ -1,6 +1,6 @@
 library ieee;
 use ieee.std_logic_1164.all;
-use work.common_pkg.all;
+use work.ccd_pkg.all;
 use work.i2c_pkg.all;
 
 package ccd_model_pkg is
@@ -16,10 +16,10 @@ package ccd_model_pkg is
     subtype VBlank_Range is natural range 8 to 2047;
 
     type CCD_Params_R is record
-        rowStart  : CCD_Height_Range;
-        colStart  : CCD_Width_Range;
-        rowSize   : CCD_Height_Range;
-        colSize   : CCD_Width_Range;
+        rowStart  : Ccd_Height_Ptr_T;
+        colStart  : Ccd_Width_Ptr_T;
+        rowSize   : Ccd_Height_Ptr_T;
+        colSize   : Ccd_Width_Ptr_T;
         -- in PIXCLKs
         hblank    : HBlank_Range;
         -- in image rows
@@ -33,10 +33,10 @@ package ccd_model_pkg is
     constant VBLANK_MIN        : VBlank_Range     := 8;
     constant HBLANK_DEFAULT    : HBlank_Range     := 782;
     constant VBLANK_DEFAULT    : VBlank_Range     := 8;
-    constant ROW_START_DEFAULT : CCD_Height_Range := 54;
-    constant COL_START_DEFAULT : CCD_Width_Range  := 16;
-    constant ROW_SIZE_DEFAULT  : CCD_Height_Range := 1943;
-    constant COL_SIZE_DEFAULT  : CCD_Width_Range  := 2591;
+    constant ROW_START_DEFAULT : Ccd_Height_Ptr_T := 54;
+    constant COL_START_DEFAULT : Ccd_Width_Ptr_T  := 16;
+    constant ROW_SIZE_DEFAULT  : Ccd_Height_Ptr_T := 1943;
+    constant COL_SIZE_DEFAULT  : Ccd_Width_Ptr_T  := 2591;
     constant REG_ADDR          : CCD_Reg_Addr_R   := (
         rowStart  => X"01",
         colStart  => X"02",

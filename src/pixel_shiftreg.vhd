@@ -1,27 +1,28 @@
 library ieee;
 use ieee.std_logic_1164.all;
 use ieee.numeric_std.all;
-use work.common_pkg.all;
+
+use work.img_pkg.Pixel_Data_T;
+use work.img_pkg.Pixel_Matrix_T;
+use work.ccd_pkg.CCD_PROPERTIES;
 
 entity pixel_shiftreg is
     generic(
-        constant SHIFT_LEN  : natural := (IMG_CONSTS.width * 2) + 3;
-        constant LINE_WIDTH : natural := IMG_CONSTS.width
+        constant SHIFT_LEN  : natural := (CCD_PROPERTIES.width * 2) + 3;
+        constant LINE_WIDTH : natural := CCD_PROPERTIES.width
     );
     port(
         clkIn, rstAsyncIn : in  std_logic;
-        dataIn            : in  Pixel_Data;
+        dataIn            : in  Pixel_Data_T;
         enableIn          : in  boolean;
-        pixelsOut         : out Pixel_Matrix
+        pixelsOut         : out Pixel_Matrix_T
     );
 
-    -- constant SHIFT_LEN : natural := (IMG_CONSTS.width * 2) + 3;
-    type Color_ShiftReg_Array is array (SHIFT_LEN - 1 downto 0) of Pixel_Data;
-    --    alias WIDTH is IMG_CONSTS.width;
+    type Pixel_Shift_Array_T is array (SHIFT_LEN - 1 downto 0) of Pixel_Data_T;
 end entity pixel_shiftreg;
 
 architecture RTL of pixel_shiftreg is
-    signal shiftReg : Color_ShiftReg_Array := (others => (others => '0'));
+    signal shiftReg : Pixel_Shift_Array_T := (others => (others => '0'));
 
 begin
     shiftProc : process(clkIn, rstAsyncIn)
