@@ -7,7 +7,7 @@ use work.sdram_ctrl_pkg.all;
 
 entity sdram_ctrl_top is
     generic(
-        ROW_MAX         : natural := 1800;
+        PAGES_REQUIRED  : natural := 1800;
         READ_BURST_LEN  : natural := 5;
         WRITE_BURST_LEN : natural := 4
     );
@@ -55,8 +55,8 @@ begin
 
     burstCtrl : entity work.sdram_ctrl
         generic map(
-            ROW_MAX   => ROW_MAX,
-            BURST_LEN => (
+            PAGES_REQUIRED => PAGES_REQUIRED,
+            BURST_LEN      => (
                 Read  => READ_BURST_LEN,
                 Write => WRITE_BURST_LEN
             )

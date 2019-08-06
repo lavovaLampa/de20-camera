@@ -11,8 +11,8 @@ context osvvm.OsvvmContext;
 
 entity sdram_ctrl is
     generic(
-        ROW_MAX   : natural     := 1800;
-        BURST_LEN : Burst_Len_T := (
+        PAGES_REQUIRED : natural     := 1800;
+        BURST_LEN      : Burst_Len_T := (
             Read  => 5,
             Write => 4
         )
@@ -433,11 +433,11 @@ begin
                     when Burst =>
                         if not prefetchData(Read).isPrefetched then
                             prefetchData(Read).isPrefetched := true;
-                            schedule_addr_prefetch(next_row_addr(prefetchData(Read).lastAddr, ROW_MAX), next_row_addr(prefetchData(Write).lastAddr, ROW_MAX), Read);
+                            schedule_addr_prefetch(next_row_addr(prefetchData(Read).lastAddr, PAGES_REQUIRED), next_row_addr(prefetchData(Write).lastAddr, PAGES_REQUIRED), Read);
 
                         elsif not prefetchData(Write).isPrefetched then
                             prefetchData(Write).isPrefetched := true;
-                            schedule_addr_prefetch(next_row_addr(prefetchData(Write).lastAddr, ROW_MAX), next_row_addr(prefetchData(Read).lastAddr, ROW_MAX), Write);
+                            schedule_addr_prefetch(next_row_addr(prefetchData(Write).lastAddr, PAGES_REQUIRED), next_row_addr(prefetchData(Read).lastAddr, PAGES_REQUIRED), Write);
 
                         -- subtract state change penalty (state register takes new value only after next rising_edge)
                         elsif burstState.counter = 1 then

@@ -56,7 +56,7 @@ architecture tb of sdram_ctrl_tb is
 begin
     dut : entity work.sdram_ctrl_top
         generic map(
-            ROW_MAX         => ROW_MAX,
+            PAGES_REQUIRED         => ROW_MAX,
             READ_BURST_LEN  => READ_BURST_LEN,
             WRITE_BURST_LEN => WRITE_BURST_LEN
         )
