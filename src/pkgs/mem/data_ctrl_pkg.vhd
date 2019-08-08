@@ -42,13 +42,9 @@ package data_ctrl_pkg is
 
     type Mem_Port_T is (Read, Write);
     type Mem_Port_State_R is record
-        nextAddr    : Ctrl_Addr_T;
-        dataPacking : Pixel_Pack_T;
-        dataHold    : Data_T;
+        addrPtr      : Ctrl_Addr_T;
+        pixelPacking : Pixel_Pack_T;
+        dataHold     : Data_T;
     end record Mem_Port_State_R;
     type Port_State_Array_T is array (Mem_Port_T) of Mem_Port_State_R;
 end package data_ctrl_pkg;
-
-package body data_ctrl_pkg is
-
-end package body data_ctrl_pkg;

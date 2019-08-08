@@ -1,8 +1,10 @@
 library ieee;
 use ieee.std_logic_1164.all;
 use ieee.numeric_std.all;
+
 use work.ccd_pkg.all;
 use work.i2c_pkg.all;
+use work.ccd_config_pkg.all;
 
 entity i2c_ccd_config is
     port(

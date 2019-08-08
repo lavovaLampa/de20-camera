@@ -27,28 +27,28 @@ architecture RTL of ccd_demosaic is
     signal color1Out, color2Out : Stage_Out         := (others => (others => '0'));
     signal color3Out            : Pixel_Data_T      := B"0000_0000";
     signal stageFrameEnd        : boolean           := false;
-    signal stageColor           : CCD_Pixel_Color_T := Green1;
+    signal stageColor           : Ccd_Pixel_Color_T := Green1;
     signal pipelineReady        : boolean           := false;
 
     -- curr state
-    signal currShiftHeight : Ccd_Height_Ptr_T := 0;
-    signal currShiftWidth  : Ccd_Width_Ptr_T  := 0;
+    signal currShiftHeight : Ccd_Active_Height_Ptr_T := 0;
+    signal currShiftWidth  : Ccd_Active_Width_Ptr_T  := 0;
 
     impure function isImageEdge return boolean is
     begin
-        return currShiftHeight = 0 or currShiftHeight = CCD_HEIGHT - 1 or currShiftWidth = 0 or currShiftWidth = CCD_WIDTH - 1;
+        return currShiftHeight = 0 or currShiftHeight = OUTPUT_HEIGHT - 1 or currShiftWidth = 0 or currShiftWidth = OUTPUT_WIDTH - 1;
     end function isImageEdge;
 begin
     coordCounterProc : process(clkIn, rstAsyncIn)
-        variable pixelCounter : Ccd_Pixel_Ptr_T := 0;
+        variable pixelCounter : Ccd_Active_Pixel_Ptr_T := 0;
     begin
         if rstAsyncIn = '1' then
             pixelCounter := 0;
         elsif rising_edge(clkIn) then
             if pixelValidIn then
                 -- current width & height of pixel in shift register
-                if pixelCounter > CCD_WIDTH + 1 then
-                    if currShiftWidth >= CCD_WIDTH - 1 then
+                if pixelCounter > OUTPUT_WIDTH + 1 then
+                    if currShiftWidth >= OUTPUT_WIDTH - 1 then
                         currShiftWidth  <= 0;
                         currShiftHeight <= currShiftHeight + 1;
                     else
@@ -68,7 +68,7 @@ begin
     end process coordCounterProc;
 
     demosaicStage1 : process(clkIn, rstAsyncIn)
-        variable currColor     : CCD_Pixel_Color_T := Green1;
+        variable currColor     : Ccd_Pixel_Color_T := Green1;
         variable resizedMatrix : Pipeline_Matrix   := (others => (others => (others => '0')));
     begin
         if rstAsyncIn = '1' then
@@ -191,8 +191,8 @@ begin
 
     pixelShiftReg : entity work.pixel_shiftreg
         generic map(
-            SHIFT_LEN  => (2 * CCD_WIDTH) + 3,
-            LINE_WIDTH => CCD_WIDTH
+            SHIFT_LEN  => (2 * OUTPUT_WIDTH) + 3,
+            LINE_WIDTH => OUTPUT_WIDTH
         )
         port map(
             clkIn      => clkIn,

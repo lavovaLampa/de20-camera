@@ -6,39 +6,38 @@ use work.ccd_model_pkg.all;
 use work.ccd_pkg.all;
 use work.i2c_pkg.all;
 
+library PoC;
+use PoC.utils.all;
+
+library osvvm;
+context osvvm.OsvvmContext;
+
 entity ccd_model is
     generic(
-        INIT_HEIGHT       : Ccd_Height_Ptr_T := 484;
-        INIT_WIDTH        : Ccd_Width_Ptr_T  := 644;
-        INIT_HEIGHT_START : Ccd_Height_Ptr_T := ROW_START_DEFAULT;
-        INIT_WIDTH_START  : Ccd_Width_Ptr_T  := COL_START_DEFAULT;
-        DEBUG             : boolean          := false
+        INIT_HEIGHT       : Ccd_Active_Height_Ptr_T := 484;
+        INIT_WIDTH        : Ccd_Active_Width_Ptr_T  := 644;
+        INIT_HEIGHT_START : Ccd_Active_Height_Ptr_T := ROW_START_DEFAULT;
+        INIT_WIDTH_START  : Ccd_Active_Width_Ptr_T  := COL_START_DEFAULT
     );
     port(
-        -- MODEL
-        clkIn, nRstAsyncIn            : in    std_logic;
+        clkIn, rstAsyncNegIn          : in    std_logic;
+        -- ccd i/o
         pixClkOut, lineValidOut       : out   std_logic;
         frameValidOut, strobeOut      : out   std_logic;
-        dataOut                       : out   CCD_Pixel_Data_T;
-        --- serial (i2c) communication
+        -- pixel data i/o
+        dataOut                       : out   Ccd_Pixel_Data_T;
+        --- i2c config i/o
         sClkIn                        : in    std_logic;
         sDataIO                       : inout std_logic;
-        -- DEBUG
-        ccdArrayIn                    : in    Ccd_Matrix_T;
+        -- debug signals
         frameDoneOut, configUpdateOut : out   boolean
     );
-
-    procedure debugPrint(val : string) is
-    begin
-        if DEBUG then
-            report val;
-        end if;
-    end procedure debugPrint;
+    constant CCD_ALERT_ID : AlertLogIDType := GetAlertLogID("CCD MODEL", ALERTLOG_BASE_ID);
 end entity ccd_model;
 
 -- TODO: write assert for rowStart, colStart, rowSize, colSize
 architecture model of ccd_model is
-    signal paramsReg : CCD_Params_R := (
+    signal paramsReg : Ccd_Params_R := (
         rowStart  => ROW_START_DEFAULT,
         colStart  => COL_START_DEFAULT,
         rowSize   => INIT_HEIGHT,
@@ -50,99 +49,111 @@ architecture model of ccd_model is
     );
 
     -- TODO: better names
-    signal hBlank, vBlank : boolean := false;
+    signal hBlank, vBlank : boolean := true;
+
+    -- debug signals
+    signal currHeightDbg   : natural;
+    signal currWidthDbg    : natural;
+    signal pixelCounterDbg : natural;
+    signal currOptionsDbg  : Ccd_Params_R;
 begin
 
     -- internal PLL currently not implemented (but we invert the pixclock output)
     pixClkOut     <= not clkIn;
-    lineValidOut  <= not boolToLogic(hBlank);
-    frameValidOut <= not boolToLogic(vBlank);
+    lineValidOut  <= not to_sl(hBlank);
+    frameValidOut <= not to_sl(vBlank);
 
-    imageOutProc : process(clkIn, nRstAsyncIn)
-        type CCD_State is (ConfigReadout, MatrixReadout);
-        variable currState   : CCD_State := ConfigReadout;
-        -- options valid for current frame (options are synchronized to frame boundaries)
-        variable currOptions : CCD_Params_R;
-        subtype Temp_Width_Range is natural range 0 to 6846;
-        subtype Temp_Height_Range is natural range 0 to 4048;
+    imageOutProc : process(clkIn, rstAsyncNegIn, paramsReg)
+        subtype Model_Width_Ptr_T is natural range 0 to ARRAY_WIDTH + Horizontal_Blank_T'high - 1;
+        subtype Model_Height_Ptr_T is natural range 0 to ARRAY_HEIGHT + Vertical_Blank_T'high - 1;
 
-        variable currWidth  : Temp_Width_Range  := 0; -- absolute
-        variable currHeight : Temp_Height_Range := 0; -- absolute
-        variable debugCount : Ccd_Pixel_Ptr_T         := 0;
+        -- state variables
+        variable currOptions  : Ccd_Params_R; -- currently used options (writes synchronized to frame boundaries)
+        variable currWidth    : Model_Width_Ptr_T      := 0;
+        variable currHeight   : Model_Height_Ptr_T     := 0;
+        variable pixelCounter : Ccd_Active_Pixel_Ptr_T := 0;
 
-        impure function getPixelOut(height : Temp_Height_Range; width : Temp_Width_Range) return CCD_Pixel_Data_T is
-            constant pixelType : CCD_Pixel_Type := getCcdPixelType(height, width);
+        impure function getPixelOut(height : natural; width : natural) return Ccd_Pixel_Data_T is
+            constant absoluteHeight : natural     := height + currOptions.rowStart;
+            constant absoluteWidth  : natural     := width + currOptions.colStart;
+            constant pixelType      : Ccd_Pixel_T := get_ccd_pixel_type(absoluteHeight, absoluteWidth);
         begin
             case pixelType is
                 when Dark =>
-                    return X"000";
+                    return (others => '0');
 
-                when Vsync | Hsync =>
-                    return X"000";
+                when VerticalBlank | HorizontalBlank =>
+                    return (others => '-');
 
-                when Active | Boundary =>
-                    if height >= currOptions.rowStart and height < currOptions.rowStart + currOptions.rowSize and width >= currOptions.colStart and width < currOptions.colStart + currOptions.colSize then
-                        debugPrint("CCD arrray access at (height, width): " & natural'image(height) & ", " & natural'image(width));
-                        debugPrint("Array coords: " & natural'image(height - currOptions.rowStart) & ", " & natural'image(width - currOptions.colStart));
-                        return ccdArrayIn(height - currOptions.rowStart, width - currOptions.colStart);
+                when Active =>
+                    if height < currOptions.rowSize and width < currOptions.colSize then
+                        Log(CCD_ALERT_ID, "CCD arrray access at (height, width): " & natural'image(absoluteHeight) & ", " & natural'image(absoluteWidth), DEBUG);
+                        Log(CCD_ALERT_ID, "Array coords: " & natural'image(absoluteHeight - currOptions.rowStart) & ", " & natural'image(absoluteWidth - currOptions.colStart), DEBUG);
+                        return pixelArray.getPixel(height, width);
                     else
-                        -- hblank
+                        -- hblank and/or vblank
                         return X"000";
                     end if;
+
+                when Boundary =>
+                    report "Currently unsupported"
+                    severity error;
+
+                    return (others => '0');
             end case;
         end function getPixelOut;
     begin
-        if nRstAsyncIn = '0' then
-            debugCount   := (currOptions.rowSize + 1) * (currOptions.colSize + 1);
+        if rstAsyncNegIn = '0' then
+            pixelCounter := 0;
             currWidth    := 0;
             currHeight   := 0;
+            currOptions  := paramsReg;
+
+            frameDoneOut <= false;
             hBlank       <= true;
             vBlank       <= true;
-            frameDoneOut <= false;
         elsif rising_edge(clkIn) then
+            -- debug signals
+            currHeightDbg   <= currHeight;
+            currWidthDbg    <= currWidth;
+            pixelCounterDbg <= pixelCounter;
+            currOptionsDbg  <= currOptions;
 
-            case currState is
-                when ConfigReadout =>
-                    if DEBUG then
-                        assert debugCount = (currOptions.rowSize + 1) * (currOptions.colSize + 1)
-                        report "Pixel count not equal to width * height of frame!"
-                        severity failure;
-                    end if;
-                    currState    := MatrixReadout;
-                    -- update current configuration parameters
+            -- strobe
+            frameDoneOut <= false;
+
+            -- reg signals
+            hBlank <= currWidth >= currOptions.colSize;
+            vBlank <= currHeight >= currOptions.rowSize;
+
+            dataOut <= getPixelOut(currHeight, currWidth);
+
+            if currWidth < currOptions.colSize and currHeight < currOptions.rowSize then
+                pixelCounter := pixelCounter + 1;
+            end if;
+
+            if currWidth >= (currOptions.colSize + currOptions.hblank) - 1 then
+                if currHeight >= (currOptions.rowSize + currOptions.vblank) - 1 then
+                    AlertIfNot(CCD_ALERT_ID, (pixelCounter = (currOptions.rowSize * currOptions.colSize)) or pixelCounter = 0,
+                               "Invalid number of pixels has been output" & LF & "Expected: " & to_string(currOptions.rowSize * currOptions.colSize) & "Got: " & to_string(pixelCounter));
+
+                    currHeight   := 0;
+                    currWidth    := 0;
+                    pixelCounter := 0;
+
                     currOptions  := paramsReg;
-                    -- reset value to defaults
-                    currWidth    := currOptions.colStart;
-                    currHeight   := currOptions.rowStart;
-                    debugCount   := 0;
-                    frameDoneOut <= false;
-                    debugPrint(
-                        LF & "Row start: " & natural'image(currOptions.rowStart) & LF & "Col start: " & natural'image(currOptions.colStart)
-                    );
+                    frameDoneOut <= true;
 
-                    assert getCurrColor(0, 0) = Green1
+                    assert get_ccd_pixel_color(currOptions.rowStart, currOptions.colStart, currOptions.rowMirror and currOptions.colMirror) = Green1
                     report "First pixel is not correctly aligned to whole Bayer pixel!"
                     severity failure;
-
-                when MatrixReadout =>
-                    hBlank     <= currWidth >= (currOptions.colStart + currOptions.colSize);
-                    vBlank     <= currHeight >= (currOptions.rowStart + currOptions.rowSize);
-                    debugCount := debugCount + 1;
-                    dataOut    <= getPixelOut(currHeight, currWidth);
-
-                    if currWidth < (currOptions.colStart + currOptions.colSize + currOptions.hblank) then
-                        currWidth := currWidth + 1;
-                    else
-                        currWidth  := currOptions.colStart;
-                        currHeight := currHeight + 1;
-                    end if;
-
-                    if currHeight > (currOptions.rowStart + currOptions.rowSize + currOptions.vblank) then
-                        currState    := ConfigReadout;
-                        frameDoneOut <= true;
-                    end if;
-
-            end case;
+                else
+                    currHeight := currHeight + 1;
+                    currWidth  := 0;
+                end if;
+            else
+                currWidth := currWidth + 1;
+            end if;
         end if;
     end process imageOutProc;
 
@@ -153,21 +164,23 @@ begin
         signal rstAsyncIn     : std_logic;
     begin
 
-        rstAsyncIn <= not nRstAsyncIn;
+        rstAsyncIn <= not rstAsyncNegIn;
 
-        serialCommsProc : process(clkIn, nRstAsyncIn)
+        serialCommsProc : process(clkIn, rstAsyncNegIn)
             variable tmpData : natural;
         begin
-            if nRstAsyncIn = '0' then
+            if rstAsyncNegIn = '0' then
                 -- initialize defaults
-                paramsReg.rowStart  <= INIT_HEIGHT_START;
-                paramsReg.colStart  <= INIT_WIDTH_START;
-                paramsReg.rowSize   <= INIT_HEIGHT;
-                paramsReg.colSize   <= INIT_WIDTH;
-                paramsReg.hblank    <= HBLANK_DEFAULT;
-                paramsReg.vblank    <= VBLANK_DEFAULT;
-                paramsReg.rowMirror <= false;
-                paramsReg.colMirror <= false;
+                paramsReg <= (
+                    rowStart  => INIT_HEIGHT_START,
+                    colStart  => INIT_WIDTH_START,
+                    rowSize   => INIT_HEIGHT,
+                    colSize   => INIT_WIDTH,
+                    hblank    => HBLANK_DEFAULT,
+                    vblank    => VBLANK_DEFAULT,
+                    rowMirror => false,
+                    colMirror => false
+                );
             elsif rising_edge(clkIn) then
                 -- TODO: should be asserted only if valid value arrived?
                 configUpdateOut <= newDataArrived;
@@ -260,10 +273,10 @@ begin
 
                         when REG_ADDR.readMode2 =>
                             -- mirror row
-                            paramsReg.rowMirror <= logicToBool(dataIn(15));
+                            paramsReg.rowMirror <= ?? dataIn(15);
                             -- mirror column
-                            paramsReg.colMirror <= logicToBool(dataIn(14));
-                            debugPrint("ReadMode2 register updated. Using only upper 2 bits.");
+                            paramsReg.colMirror <= ?? dataIn(14);
+                            Log(CCD_ALERT_ID, "ReadMode2 register updated. Using only upper 2 bits.", DEBUG);
 
                         when others =>
                             report "Register: 0x" & to_hstring(dataAddrIn) & " currently not implemented"

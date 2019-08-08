@@ -75,7 +75,7 @@ use PoC.ocram.all;                      -- "all" required by Quartus RTL simulat
 
 entity fifo_ic_got is
     generic(
-        D_BITS         : positive;      -- Data Width
+        DATA_WIDTH     : positive;      -- Data Width
         MIN_DEPTH      : positive;      -- Minimum FIFO Depth
         DATA_REG       : boolean := false; -- Store Data Content in Registers
         OUTPUT_REG     : boolean := false; -- Registered FIFO Output
@@ -84,25 +84,25 @@ entity fifo_ic_got is
     );
     port(
         -- Write Interface
-        clkWriteIn, rstWriteIn : in  std_logic;
-        put                    : in  boolean;
-        dataIn                 : in  std_logic_vector(D_BITS - 1 downto 0);
-        full                   : out boolean;
-        estate_wr              : out unsigned(imax(ESTATE_WR_BITS - 1, 0) downto 0);
+        clkWriteIn, rstWriteIn : in  std_logic; -- synchronous reset
+        put                    : in  boolean; -- whether to advance write pointer
+        dataIn                 : in  std_logic_vector(DATA_WIDTH - 1 downto 0);
+        full                   : out boolean; -- full flag
+        estate_wr              : out unsigned(imax(ESTATE_WR_BITS - 1, 0) downto 0); -- write "emptiness" state (i.e. how "empty" the fifo is)
         -- Read Interface
-        clkReadIn, rstReadIn   : in  std_logic;
-        got                    : in  boolean;
-        valid                  : out boolean;
-        dataOut                : out std_logic_vector(D_BITS - 1 downto 0);
-        fstate_rd              : out unsigned(imax(FSTATE_RD_BITS - 1, 0) downto 0)
+        clkReadIn, rstReadIn   : in  std_logic; -- synchronous reset
+        got                    : in  boolean; -- whether to advance read pointer
+        valid                  : out boolean; -- whether the data is valid on dataOut (FWFT)
+        dataOut                : out std_logic_vector(DATA_WIDTH - 1 downto 0);
+        fstate_rd              : out unsigned(imax(FSTATE_RD_BITS - 1, 0) downto 0) -- read "fullness" state (i.e. how "full" the fifo is)
     );
 end entity fifo_ic_got;
 
 architecture rtl of fifo_ic_got is
 
     -- Constants
-    constant A_BITS : positive := log2ceilnz(MIN_DEPTH);
-    constant AN     : positive := A_BITS + 1;
+    constant ADDR_WIDTH : positive := log2ceilnz(MIN_DEPTH);
+    constant AN         : positive := ADDR_WIDTH + 1;
 
     -- Registers, clk_wr domain
     signal IP1     : std_logic_vector(AN - 1 downto 0); -- IP + 1
@@ -121,12 +121,12 @@ architecture rtl of fifo_ic_got is
     signal outputValid      : boolean                           := false; -- Output Valid
 
     -- Memory Connectivity
-    signal wa          : unsigned(A_BITS - 1 downto 0);
-    signal di          : std_logic_vector(D_BITS - 1 downto 0);
-    signal putInternal : boolean;
+    signal memWriteAddr : unsigned(ADDR_WIDTH - 1 downto 0);
+    signal memDataIn    : std_logic_vector(DATA_WIDTH - 1 downto 0);
+    signal putInternal  : boolean;
 
-    signal ra          : unsigned(A_BITS - 1 downto 0);
-    signal do          : std_logic_vector(D_BITS - 1 downto 0);
+    signal memReadAddr : unsigned(ADDR_WIDTH - 1 downto 0);
+    signal memDataOut  : std_logic_vector(DATA_WIDTH - 1 downto 0);
     signal getInternal : boolean;
 
     signal gotInternal : boolean;       -- Internal Read ACK
@@ -137,19 +137,19 @@ begin
     -- Write clock domain
     -----------------------------------------------------------------------------
     blkIP : block
-        signal Cnt : unsigned(AN - 1 downto 0) := to_unsigned(1, AN);
+        signal counter : unsigned(AN - 1 downto 0) := to_unsigned(1, AN);
     begin
         process(clkWriteIn)
         begin
             if rising_edge(clkWriteIn) then
                 if rstWriteIn = '1' then
-                    Cnt <= to_unsigned(1, AN);
+                    counter <= to_unsigned(1, AN);
                 elsif putInternal then
-                    Cnt <= Cnt + 1;
+                    counter <= counter + 1;
                 end if;
             end if;
         end process;
-        IP1 <= std_logic_vector(Cnt(A_BITS) & (Cnt(A_BITS - 1 downto 0) xor ('0' & Cnt(A_BITS - 1 downto 1))));
+        IP1 <= std_logic_vector(counter(ADDR_WIDTH) & (counter(ADDR_WIDTH - 1 downto 0) xor ('0' & counter(ADDR_WIDTH - 1 downto 1))));
     end block blkIP;
 
     -- Update Write Pointer upon puti
@@ -168,14 +168,14 @@ begin
                 OPc <= OPs;
                 if putInternal then
                     IP0 <= IP1;
-                    if IP1(A_BITS - 1 downto 0) = OPc(A_BITS - 1 downto 0) then
+                    if IP1(ADDR_WIDTH - 1 downto 0) = OPc(ADDR_WIDTH - 1 downto 0) then
                         memFull <= true;
                     else
                         memFull <= false;
                     end if;
                 end if;
                 if memFull then
-                    if IP0 = (not OPc(A_BITS) & OPc(A_BITS - 1 downto 0)) then
+                    if IP0 = (not OPc(ADDR_WIDTH) & OPc(ADDR_WIDTH - 1 downto 0)) then
                         memFull <= true;
                     else
                         memFull <= false;
@@ -187,26 +187,26 @@ begin
     putInternal <= put and not memFull;
     full        <= memFull;
 
-    di <= dataIn;
-    wa <= unsigned(IP0(A_BITS - 1 downto 0));
+    memDataIn    <= dataIn;
+    memWriteAddr <= unsigned(IP0(ADDR_WIDTH - 1 downto 0));
 
     -----------------------------------------------------------------------------
     -- Read clock domain
     -----------------------------------------------------------------------------
     blkOP : block
-        signal Cnt : unsigned(AN - 1 downto 0) := to_unsigned(1, AN);
+        signal counter : unsigned(AN - 1 downto 0) := to_unsigned(1, AN);
     begin
         process(clkReadIn)
         begin
             if rising_edge(clkReadIn) then
                 if rstReadIn = '1' then
-                    Cnt <= to_unsigned(1, AN);
+                    counter <= to_unsigned(1, AN);
                 elsif getInternal then
-                    Cnt <= Cnt + 1;
+                    counter <= counter + 1;
                 end if;
             end if;
         end process;
-        OP1 <= std_logic_vector(Cnt(A_BITS) & (Cnt(A_BITS - 1 downto 0) xor ('0' & Cnt(A_BITS - 1 downto 1))));
+        OP1 <= std_logic_vector(counter(ADDR_WIDTH) & (counter(ADDR_WIDTH - 1 downto 0) xor ('0' & counter(ADDR_WIDTH - 1 downto 1))));
     end block blkOP;
 
     process(clkReadIn)
@@ -223,7 +223,7 @@ begin
                 IPc <= IPs;
                 if getInternal then
                     OP0         <= OP1;
-                    if OP1(A_BITS - 1 downto 0) = IPc(A_BITS - 1 downto 0) then
+                    if OP1(ADDR_WIDTH - 1 downto 0) = IPc(ADDR_WIDTH - 1 downto 0) then
                         memDataAvailable <= false;
                     else
                         memDataAvailable <= true;
@@ -245,7 +245,7 @@ begin
         end if;
     end process;
     getInternal <= (not outputValid or gotInternal) and memDataAvailable;
-    ra          <= unsigned(OP0(A_BITS - 1 downto 0));
+    memReadAddr <= unsigned(OP0(ADDR_WIDTH - 1 downto 0));
 
     -----------------------------------------------------------------------------
     -- Add register to data output
@@ -255,12 +255,12 @@ begin
     -----------------------------------------------------------------------------
     genRegN : if DATA_REG or not OUTPUT_REG generate
         gotInternal <= got;
-        dataOut     <= do;
+        dataOut     <= memDataOut;
         valid       <= outputValid;
     end generate genRegN;
     genRegY : if (not DATA_REG) and OUTPUT_REG generate
-        signal Buf  : std_logic_vector(D_BITS - 1 downto 0) := (others => '-');
-        signal VldB : boolean                               := false;
+        signal Buf  : std_logic_vector(DATA_WIDTH - 1 downto 0) := (others => '-');
+        signal VldB : boolean                                   := false;
     begin
         process(clkReadIn)
         begin
@@ -269,7 +269,7 @@ begin
                     Buf  <= (others => '-');
                     VldB <= false;
                 elsif gotInternal then
-                    Buf  <= do;
+                    Buf  <= memDataOut;
                     VldB <= outputValid;
                 end if;
             end if;
@@ -284,9 +284,9 @@ begin
     -----------------------------------------------------------------------------
     -- Write Clock Domain
     gEstateWr : if ESTATE_WR_BITS >= 1 generate
-        signal d : unsigned(A_BITS - 1 downto 0);
+        signal d : unsigned(ADDR_WIDTH - 1 downto 0);
     begin
-        d         <= unsigned(gray2bin(OPc(A_BITS - 1 downto 0))) + not unsigned(gray2bin(IP0(A_BITS - 1 downto 0)));
+        d         <= gray2bin(OPc(ADDR_WIDTH - 1 downto 0)) + not gray2bin(IP0(ADDR_WIDTH - 1 downto 0));
         estate_wr <= (others => '0') when memFull else unsigned(d(d'left downto d'left - ESTATE_WR_BITS + 1));
     end generate gEstateWr;
     gNoEstateWr : if ESTATE_WR_BITS = 0 generate
@@ -295,9 +295,9 @@ begin
 
     -- Read Clock Domain
     gFstateRd : if FSTATE_RD_BITS >= 1 generate
-        signal d : unsigned(A_BITS - 1 downto 0);
+        signal d : unsigned(ADDR_WIDTH - 1 downto 0);
     begin
-        d         <= unsigned(gray2bin(IPc(A_BITS - 1 downto 0))) + not unsigned(gray2bin(OP0(A_BITS - 1 downto 0)));
+        d         <= gray2bin(IPc(ADDR_WIDTH - 1 downto 0)) + not gray2bin(OP0(ADDR_WIDTH - 1 downto 0));
         fstate_rd <= (others => '0') when not memDataAvailable else unsigned(d(d'left downto d'left - FSTATE_RD_BITS + 1));
     end generate gFstateRd;
     gNoFstateRd : if FSTATE_RD_BITS = 0 generate
@@ -310,8 +310,8 @@ begin
     gLarge : if not DATA_REG generate
         ram : entity PoC.ocram_sdp
             generic map(
-                A_BITS => A_BITS,
-                D_BITS => D_BITS
+                A_BITS => ADDR_WIDTH,
+                D_BITS => DATA_WIDTH
             )
             port map(
                 wclk => clkWriteIn,
@@ -319,16 +319,16 @@ begin
                 wce  => '1',
                 rce  => to_sl(getInternal),
                 we   => to_sl(putInternal),
-                ra   => ra,
-                wa   => wa,
-                d    => di,
-                q    => do
+                ra   => memReadAddr,
+                wa   => memWriteAddr,
+                d    => memDataIn,
+                q    => memDataOut
             );
     end generate gLarge;
 
     gSmall : if DATA_REG generate
         -- Memory modelled as Array
-        type regfile_t is array (0 to 2**A_BITS - 1) of std_logic_vector(D_BITS - 1 downto 0);
+        type regfile_t is array (0 to 2**ADDR_WIDTH - 1) of std_logic_vector(DATA_WIDTH - 1 downto 0);
         signal regfile      : regfile_t;
         attribute ram_style : string;   -- XST specific
         attribute ram_style of regfile : signal is "distributed";
@@ -352,7 +352,7 @@ begin
                 else
                     --synthesis translate_on
                     if putInternal then
-                        regfile(to_integer(wa)) <= di;
+                        regfile(to_integer(memWriteAddr)) <= memDataIn;
                     end if;
                     --synthesis translate_off
                 end if;
@@ -365,12 +365,12 @@ begin
         begin                           -- process
             if rising_edge(clkReadIn) then
                 if SIMULATION and (rstReadIn = '1') then
-                    do <= (others => 'U');
+                    memDataOut <= (others => 'U');
                 elsif getInternal then
-                    if Is_X(std_logic_vector(ra)) then
-                        do <= (others => 'X');
+                    if Is_X(std_logic_vector(memReadAddr)) then
+                        memDataOut <= (others => 'X');
                     else
-                        do <= regfile(to_integer(ra));
+                        memDataOut <= regfile(to_integer(memReadAddr));
                     end if;
                 end if;
             end if;

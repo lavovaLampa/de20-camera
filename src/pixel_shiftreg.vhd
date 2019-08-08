@@ -4,12 +4,12 @@ use ieee.numeric_std.all;
 
 use work.img_pkg.Pixel_Data_T;
 use work.img_pkg.Pixel_Matrix_T;
-use work.ccd_pkg.CCD_PROPERTIES;
+use work.ccd_pkg.CCD_CONFIGURATION;
 
 entity pixel_shiftreg is
     generic(
-        constant SHIFT_LEN  : natural := (CCD_PROPERTIES.width * 2) + 3;
-        constant LINE_WIDTH : natural := CCD_PROPERTIES.width
+        constant SHIFT_LEN  : natural := (CCD_CONFIGURATION.width * 2) + 3;
+        constant LINE_WIDTH : natural := CCD_CONFIGURATION.width
     );
     port(
         clkIn, rstAsyncIn : in  std_logic;
