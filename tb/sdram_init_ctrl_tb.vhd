@@ -1,5 +1,6 @@
 library ieee;
 use ieee.std_logic_1164.all;
+
 use work.sdram_pkg.all;
 
 entity sdram_init_ctrl_tb is
@@ -62,18 +63,15 @@ begin
             simEndedIn         => simEnded
         );
 
-    -- Clock generation
+    -- clock generation
     tbClock <= not tbClock after CLK_PERIOD / 2 when tbSimEnded /= '1' else '0';
-
-    -- EDIT: Check that clkIn is really your main clock signal
-    clkIn <= tbClock;
+    clkIn   <= tbClock;
 
     stimuli : process
     begin
-        SetLogEnable(DEBUG, true);
+        --        SetLogEnable(DEBUG, true);
         SetLogEnable(INFO, true);
 
-        -- EDIT Adapt initialization as needed
         clkStable <= '0';
         simEnded  <= false;
 
