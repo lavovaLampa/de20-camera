@@ -8,7 +8,7 @@ MODEL_DIR_SUFFIX = model
 
 GHW_OPTS_SUFFIX = _ghw_opts.txt
 
-COMMON_OPTS = --std=08 --workdir=$(WORK_DIR)
+COMMON_OPTS = --std=08 --workdir=$(WORK_DIR) -fpsl
 IMPORT_OPTS = $(COMMON_OPTS)
 MAKE_OPTS = $(COMMON_OPTS) -g -Pwork
 RUN_OPTS = --wave=$(WORK_DIR)/$<.ghw

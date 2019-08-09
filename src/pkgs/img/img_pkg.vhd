@@ -3,8 +3,8 @@ use ieee.std_logic_1164.all;
 use ieee.numeric_std.all;
 
 package img_pkg is
-    constant IMG_WIDTH : natural := 640;
-    constant IMG_HEIGHT : natural := 480;
+    constant IMG_WIDTH   : natural := 640;
+    constant IMG_HEIGHT  : natural := 480;
     constant PIXEL_WIDTH : natural := 8;
 
     subtype Img_Width_Ptr_T is natural range 0 to IMG_WIDTH - 1;
@@ -17,6 +17,7 @@ package img_pkg is
     subtype Pixel_Data_T is unsigned(PIXEL_WIDTH - 1 downto 0);
     type Pixel_Aggregate_T is array (Pixel_Color_T) of Pixel_Data_T;
     type Pixel_Matrix_T is array (2 downto 0, 2 downto 0) of Pixel_Data_T;
+
 end package img_pkg;
 
 package body img_pkg is

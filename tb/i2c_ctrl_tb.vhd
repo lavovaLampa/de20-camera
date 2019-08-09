@@ -8,25 +8,25 @@ entity i2c_ctrl_tb is
     -- clock has to be 4 times i2c clock
     constant CLK_PERIOD : time := 4 * I2C_PERIOD;
 
-    constant TEST_DATA      : I2C_Data := X"5555";
-    constant TEST_DEV_ADDR  : I2C_Addr := CCD_WRITE_ADDR;
-    constant TEST_DATA_ADDR : I2C_Addr := X"55";
+    constant TEST_DATA      : I2c_Data_T := X"5555";
+    constant TEST_DEV_ADDR  : I2c_Addr_T := CCD_WRITE_ADDR;
+    constant TEST_DATA_ADDR : I2c_Addr_T := X"55";
 end i2c_ctrl_tb;
 
 architecture tb of i2c_ctrl_tb is
 
     signal clkIn, rstAsyncIn : std_logic := '0';
     signal enableIn          : boolean   := false;
-    signal dataIn            : I2C_Data  := X"0000";
-    signal devAddrIn         : I2C_Addr  := X"00";
-    signal dataAddrIn        : I2C_Addr  := X"00";
+    signal dataIn            : I2c_Data_T  := X"0000";
+    signal devAddrIn         : I2c_Addr_T  := X"00";
+    signal dataAddrIn        : I2c_Addr_T  := X"00";
     signal doneOut, errorOut : boolean;
     signal sClkOut           : std_logic;
     signal sDataIO           : std_logic := 'Z';
 
     signal slaveDataReceived         : boolean;
-    signal recvDevAddr, recvDataAddr : I2C_Addr;
-    signal recvData                  : I2C_Data;
+    signal recvDevAddr, recvDataAddr : I2c_Addr_T;
+    signal recvData                  : I2c_Data_T;
 
     signal tbClock    : std_logic := '0';
     signal tbSimEnded : std_logic := '0';
@@ -36,7 +36,7 @@ begin
     dut : entity work.i2c_ctrl
         port map(clkIn      => clkIn,
                  rstAsyncIn => rstAsyncIn,
-                 enableIn   => enableIn,
+                 enableInStrobe   => enableIn,
                  dataIn     => dataIn,
                  devAddrIn  => devAddrIn,
                  dataAddrIn => dataAddrIn,

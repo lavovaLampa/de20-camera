@@ -48,7 +48,7 @@ architecture model of ccd_model is
         colMirror => false
     );
 
-    -- TODO: better names
+    -- helper state registers
     signal hBlank, vBlank : boolean := true;
 
     -- debug signals
@@ -159,8 +159,8 @@ begin
 
     serialConfig : block
         signal newDataArrived : boolean;
-        signal dataIn         : I2C_Data;
-        signal dataAddrIn     : I2C_Addr;
+        signal dataIn         : I2c_Data_T;
+        signal dataAddrIn     : I2c_Addr_T;
         signal rstAsyncIn     : std_logic;
     begin
 
@@ -286,9 +286,8 @@ begin
             end if;
         end process serialCommsProc;
 
-        iicSlave : entity work.i2c_slave_model
+        i2cSlave : entity work.i2c_slave_model
             generic map(
-                DEBUG      => false,
                 CHECK_DATA => false
             )
             port map(

@@ -13,13 +13,13 @@ architecture tb of i2c_ccd_config_tb is
     signal enableIn          : boolean;
     signal doneOut           : boolean;
 
-    signal expectedData                      : I2C_Data;
-    signal expectedDataAddr, expectedDevAddr : I2C_Addr;
+    signal expectedData                      : I2c_Data_T;
+    signal expectedDataAddr, expectedDevAddr : I2c_Addr_T;
 
     signal slaveDataReceived         : boolean;
     signal dataOutCount              : natural := 0;
-    signal recvData                  : I2C_Data;
-    signal recvDevAddr, recvDataAddr : I2C_Addr;
+    signal recvData                  : I2c_Data_T;
+    signal recvDevAddr, recvDataAddr : I2c_Addr_T;
 
     -- i2c signals
     signal sClkOut : std_logic;

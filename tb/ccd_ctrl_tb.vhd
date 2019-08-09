@@ -62,7 +62,7 @@ begin
             vBlankOut         => vBlank,
             heightOut         => currHeight,
             widthOut          => currWidth,
-            pixelCounterOut       => pixelCounter,
+            pixelCounterOut   => pixelCounter,
             pixelOut          => pixelOut
         );
 

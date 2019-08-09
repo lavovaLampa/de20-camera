@@ -5,18 +5,15 @@ use work.ccd_pkg.all;
 use work.i2c_pkg.all;
 
 package ccd_model_pkg is
-    type Ccd_Pixel_Array_T is protected
-        procedure setPixel(currHeight : in Ccd_Active_Height_Ptr_T; currWidth : in Ccd_Active_Width_Ptr_T; value : in Ccd_Pixel_Data_T);
-        impure function getPixel(currHeight : Ccd_Active_Height_Ptr_T; currWidth : Ccd_Active_Width_Ptr_T) return Ccd_Pixel_Data_T;
-    end protected Ccd_Pixel_Array_T;
+    -- pixel array to be used in simulation
     shared variable pixelArray : Ccd_Pixel_Array_T;
 
     type CCD_Reg_Addr_R is record
-        rowStart, colStart : I2C_Addr;
-        rowSize, colSize   : I2C_Addr;
-        hblank, vblank     : I2C_Addr;
+        rowStart, colStart : I2c_Addr_T;
+        rowSize, colSize   : I2c_Addr_T;
+        hblank, vblank     : I2c_Addr_T;
         -- mirror row/column, show dark rows/columns, etc.
-        readMode2          : I2C_Addr;
+        readMode2          : I2c_Addr_T;
     end record CCD_Reg_Addr_R;
 
     type Ccd_Params_R is record
@@ -153,21 +150,5 @@ package body ccd_model_pkg is
     begin
         return pixelTypeMap(rowType, colType);
     end function get_ccd_pixel_type;
-
-    type Ccd_Pixel_Array_T is protected body
-        type Ccd_Pixel_Matrix_T is array (Ccd_Active_Height_Ptr_T, Ccd_Active_Width_Ptr_T) of Ccd_Pixel_Data_T;
-
-        variable pixelMatrix : Ccd_Pixel_Matrix_T;
-
-        procedure setPixel(currHeight : in Ccd_Active_Height_Ptr_T; currWidth : in Ccd_Active_Width_Ptr_T; value : in Ccd_Pixel_Data_T) is
-        begin
-            pixelMatrix(currHeight, currWidth) := value;
-        end procedure setPixel;
-
-        impure function getPixel(currHeight : Ccd_Active_Height_Ptr_T; currWidth : Ccd_Active_Width_Ptr_T) return Ccd_Pixel_Data_T is
-        begin
-            return pixelMatrix(currHeight, currWidth);
-        end function getPixel;
-    end protected body Ccd_Pixel_Array_T;
 
 end package body ccd_model_pkg;

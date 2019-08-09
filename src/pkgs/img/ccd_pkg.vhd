@@ -71,10 +71,31 @@ package ccd_pkg is
     -- ccd has bayer color mask (2 * green pixel)
     type Ccd_Pixel_Color_T is (Red, Green1, Green2, Blue);
 
+    type Ccd_Pixel_Array_T is protected
+        procedure setPixel(currHeight : in Ccd_Active_Height_Ptr_T; currWidth : in Ccd_Active_Width_Ptr_T; value : in Ccd_Pixel_Data_T);
+        impure function getPixel(currHeight : Ccd_Active_Height_Ptr_T; currWidth : Ccd_Active_Width_Ptr_T) return Ccd_Pixel_Data_T;
+    end protected Ccd_Pixel_Array_T;
+
     pure function get_ccd_pixel_color(absoluteHeight : Ccd_Active_Height_Ptr_T; absoluteWidth : Ccd_Active_Width_Ptr_T; isMirrored : boolean) return Ccd_Pixel_Color_T;
 end package ccd_pkg;
 
 package body ccd_pkg is
+    type Ccd_Pixel_Array_T is protected body
+        type Ccd_Pixel_Matrix_T is array (Ccd_Active_Height_Ptr_T, Ccd_Active_Width_Ptr_T) of Ccd_Pixel_Data_T;
+
+        variable pixelMatrix : Ccd_Pixel_Matrix_T;
+
+        procedure setPixel(currHeight : in Ccd_Active_Height_Ptr_T; currWidth : in Ccd_Active_Width_Ptr_T; value : in Ccd_Pixel_Data_T) is
+        begin
+            pixelMatrix(currHeight, currWidth) := value;
+        end procedure setPixel;
+
+        impure function getPixel(currHeight : Ccd_Active_Height_Ptr_T; currWidth : Ccd_Active_Width_Ptr_T) return Ccd_Pixel_Data_T is
+        begin
+            return pixelMatrix(currHeight, currWidth);
+        end function getPixel;
+    end protected body Ccd_Pixel_Array_T;
+
     pure function decode_color(isEvenRow : boolean; isEvenColumn : boolean) return Ccd_Pixel_Color_T is
     begin
         if isEvenColumn then

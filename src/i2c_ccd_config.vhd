@@ -16,17 +16,20 @@ entity i2c_ccd_config is
         sDataIO           : inout std_logic
     );
     alias romData is CCD_CONFIG;
-    type FSM_State is (WaitForEnable, SendCmd, AwaitCompletion, Done);
 end entity i2c_ccd_config;
 
 architecture RTL of i2c_ccd_config is
-    signal fsmState  : FSM_State := WaitForEnable;
-    signal configPtr : natural   := 0;
+    type Ctrl_State_T is (WaitForEnable, SendCmd, AwaitCompletion, Done);
+
+    -- state registers
+    signal fsmState  : Ctrl_State_T := WaitForEnable;
+    -- TODO: add bounds
+    signal configPtr : natural      := 0;
 
     -- i2c controller INPUT
-    signal ctrlData            : I2C_Data := X"0000";
-    signal devAddr, dataAddr   : I2C_Addr := X"00";
-    signal ctrlEnable          : boolean  := false;
+    signal ctrlData            : I2c_Data_T := X"0000";
+    signal devAddr, dataAddr   : I2c_Addr_T := X"00";
+    signal ctrlEnable          : boolean    := false;
     -- i2c controller OUTPUT
     signal ctrlDone, ctrlError : boolean;
 begin
@@ -39,7 +42,8 @@ begin
             fsmState  <= WaitForEnable;
             configPtr <= 0;
             doneOut   <= false;
-        elsif falling_edge(clkIn) then
+        -- TODO: check if falling_edge -> rising_edge change breaks anything
+        elsif rising_edge(clkIn) then
             case fsmState is
                 when WaitForEnable =>
                     configPtr <= 0;
@@ -77,16 +81,16 @@ begin
 
     i2c_ctrl_inst : entity work.i2c_ctrl
         port map(
-            clkIn      => clkIn,
-            rstAsyncIn => rstAsyncIn,
-            enableIn   => ctrlEnable,
-            dataIn     => ctrlData,
-            devAddrIn  => devAddr,
-            dataAddrIn => dataAddr,
-            doneOut    => ctrlDone,
-            errorOut   => ctrlError,
-            sClkOut    => sClkOut,
-            sDataIO    => sDataIO
+            clkIn          => clkIn,
+            rstAsyncIn     => rstAsyncIn,
+            enableInStrobe => ctrlEnable,
+            dataIn         => ctrlData,
+            devAddrIn      => devAddr,
+            dataAddrIn     => dataAddr,
+            doneOut        => ctrlDone,
+            errorOut       => ctrlError,
+            sClkOut        => sClkOut,
+            sDataIO        => sDataIO
         );
 
 end architecture RTL;

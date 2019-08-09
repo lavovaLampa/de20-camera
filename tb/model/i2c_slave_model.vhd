@@ -1,11 +1,15 @@
 library ieee;
 use ieee.std_logic_1164.all;
 use ieee.numeric_std.all;
+
 use work.i2c_pkg.all;
+
+library osvvm;
+context osvvm.OsvvmContext;
 
 entity i2c_slave_model is
     generic(
-        DEBUG, CHECK_DATA : boolean := false
+        CHECK_DATA : boolean := false
     );
     port(
         testClkIn                             : in    std_logic;
@@ -15,33 +19,25 @@ entity i2c_slave_model is
         dataReceivedOut                       : out   boolean   := false;
         sDataIO                               : inout std_logic := 'Z';
         -- test signals
-        recvDevAddrOut, recvDataAddrOut       : out   I2C_Addr;
-        recvDataOut                           : out   I2C_Data;
-        expectedDevAddrIn, expectedDataAddrIn : in    I2C_Addr;
-        expectedDataIn                        : in    I2C_Data
+        recvDevAddrOut, recvDataAddrOut       : out   I2c_Addr_T;
+        recvDataOut                           : out   I2c_Data_T;
+        -- test checking signals
+        expectedDevAddrIn, expectedDataAddrIn : in    I2c_Addr_T;
+        expectedDataIn                        : in    I2c_Data_T
     );
+    constant I2C_SLAVE_ALERT_ID : AlertLogIDType := GetAlertLogID("i2c slave", ALERTLOG_BASE_ID);
 end entity i2c_slave_model;
 
 architecture model of i2c_slave_model is
-    type Slave_State is (Receive, Acknowledge, IgnoreStop);
-
-    signal testDataAggregate          : I2C_Aggregate;
+    signal testDataAggregate          : I2c_Aggregate_T;
     signal startReceived, endReceived : boolean := false;
     signal doAck, dataDone            : boolean := false;
     signal batchOK                    : boolean := false;
 
-    signal dataInAcc : I2C_Aggregate := X"00000000";
-
-    procedure debugPrint(val : string) is
-    begin
-        if DEBUG then
-            report val;
-        end if;
-    end procedure debugPrint;
-
+    signal dataInAcc : I2c_Aggregate_T := X"00000000";
 begin
 
-    testDataAggregate <= expectedDevAddrIn & expectedDataAddrIn & expectedDataIn;
+    testDataAggregate <= std_logic_vector(expectedDevAddrIn) & std_logic_vector(expectedDataAddrIn) & expectedDataIn;
 
     -- synchronized to TB clock
     reportProc : process(testClkIn, rstAsyncIn)
@@ -58,51 +54,54 @@ begin
     end process reportProc;
 
     readProc : process(sClkIn, rstAsyncIn)
-        -- registers
-        variable currState : Slave_State          := Receive;
-        variable bitPtr    : Data_Aggregate_Range := AGGREGATE_WIDTH - 1;
+        type Model_State_T is (Receive, Acknowledge, IgnoreStop);
 
+        -- registers
+        variable currState  : Model_State_T       := Receive;
+        variable currBitPtr : I2c_Aggregate_Ptr_T := AGGREGATE_WIDTH - 1;
+
+        -- helper wire variable
         variable currBit : std_logic := '0';
     begin
         if rstAsyncIn = '1' then
-            bitPtr    := AGGREGATE_WIDTH - 1;
-            currState := Receive;
-            doAck     <= false;
+            currBitPtr := AGGREGATE_WIDTH - 1;
+            currState  := Receive;
+
+            doAck <= false;
         elsif rising_edge(sClkIn) then
-            currBit := i2cBusToLogic(sDataIO);
+            currBit := i2c_to_logic(sDataIO);
 
             case currState is
                 when Receive =>
                     dataDone <= false;
                     if startReceived then
-                        debugPrint("Received bit (index): " & natural'image(bitPtr) & " -> Value: " & std_logic'image(currBit));
+                        Log(I2C_SLAVE_ALERT_ID, "Received bit (index): " & to_string(currBitPtr) & " -> Value: " & to_string(currBit), DEBUG);
                         if CHECK_DATA then
-                            assert currBit = testDataAggregate(bitPtr)
-                            report "Received wrong bit value at index: " & natural'image(bitPtr) & LF &
-                               "Expected: " & std_logic'image(testDataAggregate(bitPtr)) & LF &
-                               "Received: " & std_logic'image(currBit) severity warning;
+                            AlertIfNot(I2C_SLAVE_ALERT_ID, currBit = testDataAggregate(currBitPtr), "Received wrong bit value at index: " & natural'image(currBitPtr) & LF & "Expected: " & std_logic'image(testDataAggregate(currBitPtr)) & LF & "Received: " & std_logic'image(currBit));
                         end if;
 
-                        dataInAcc(bitPtr) <= currBit;
-                        if bitPtr mod 8 = 0 then
+                        dataInAcc(currBitPtr) <= currBit;
+                        if currBitPtr mod 8 = 0 then
                             currState := Acknowledge;
                             doAck     <= true;
                         end if;
-                        if bitPtr > 0 then
-                            bitPtr := bitPtr - 1;
+                        if currBitPtr > 0 then
+                            currBitPtr := currBitPtr - 1;
                         end if;
                     else
                         report "Clock running without receiving start bit!" severity warning;
                     end if;
 
                 when Acknowledge =>
-                    debugPrint("-------------BYTE SEPARATOR-------------");
+                    Log(I2C_SLAVE_ALERT_ID, "-------------BYTE SEPARATOR-------------", DEBUG);
+
                     assert currBit = '0' report "byte wasn't acknowledged or data bus wasn't free" severity failure;
                     doAck <= false;
-                    if bitPtr = 0 then
-                        dataDone  <= true;
-                        bitPtr    := AGGREGATE_WIDTH - 1;
-                        currState := IgnoreStop;
+
+                    if currBitPtr = 0 then
+                        dataDone   <= true;
+                        currBitPtr := AGGREGATE_WIDTH - 1;
+                        currState  := IgnoreStop;
                     else
                         currState := Receive;
                     end if;
@@ -128,13 +127,13 @@ begin
             end if;
         end if;
 
-        sDataIO <= logicToI2CBus(dataOut);
+        sDataIO <= logic_to_i2c(dataOut);
     end process writeProc;
 
     -- latches & potentially non-synthesizable constructs ahead, BEWARE!
     ctrlProc : process(sDataIO, rstAsyncIn)
-        variable tmpDevAddr, tmpDataAddr : I2C_Addr := X"00";
-        variable tmpData                 : I2C_Data := X"0000";
+        variable tmpDevAddr, tmpDataAddr : I2c_Addr_T := X"00";
+        variable tmpData                 : I2c_Data_T := X"0000";
     begin
         if rstAsyncIn = '1' then
             endReceived   <= false;
@@ -144,7 +143,8 @@ begin
             -- if START bit received
             -- HIGH to LOW transition on DATA line while CLK is HIGH
             if sDataIO = '0' and sClkIn = '1' and sClkIn'stable then
-                debugPrint("received start bit");
+                Log(I2C_SLAVE_ALERT_ID, "Received start flag", DEBUG);
+
                 endReceived   <= false;
                 startReceived <= true;
                 batchOK       <= false;
@@ -152,13 +152,14 @@ begin
             -- if STOP bit received
             -- LOW to HIGH transition on DATA line while CLK is HIGH
             elsif sDataIO = 'Z' and sClkIn = '1' and sClkIn'stable then
-                debugPrint("received stop bit");
+                Log(I2C_SLAVE_ALERT_ID, "Received stop flag", DEBUG);
+
                 startReceived <= false;
                 endReceived   <= true;
 
                 assert dataDone report "Slave didn't receive all data" severity failure;
-                tmpDevAddr  := dataInAcc(31 downto 24);
-                tmpDataAddr := dataInAcc(23 downto 16);
+                tmpDevAddr  := unsigned(dataInAcc(31 downto 24));
+                tmpDataAddr := unsigned(dataInAcc(23 downto 16));
                 tmpData     := dataInAcc(DATA_WIDTH - 1 downto 0);
                 report "Data received OK: 0x" & to_hstring(dataInAcc);
 
