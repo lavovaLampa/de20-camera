@@ -6,8 +6,8 @@ use work.sdram_pkg.all;
 
 entity sdram_init_ctrl is
     generic(
-        MODE_REG          : std_logic_vector(15 downto 0) := (others => '0');
-        INIT_DELAY_CYCLES : natural                       := 200 us / CLK_PERIOD
+        MODE_REG          : Data_T  := (others => '0');
+        INIT_DELAY_CYCLES : natural := 200 us / CLK_PERIOD
     );
     port(
         clkIn, rstAsyncIn : in    std_logic;

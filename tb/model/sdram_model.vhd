@@ -13,11 +13,11 @@ context osvvm.OsvvmContext;
 -- SDRAM must support CONCURRENT AUTO PRECHARGE
 entity sdram_model is
     generic(
-        -- simulation settings
-        LOAD_FROM_FILE   : boolean := false; -- whether to load memory content from file
-        DUMP_TO_FILE     : boolean := false; -- whether to store memory content to a file
-        INPUT_FILE_NAME  : string  := "input_fjel.txt"; -- name of a file to be loaded
-        OUTPUT_FILE_NAME : string  := "output_fjel.txt" -- name of a file to be dumped
+        -- model simulation settings
+        LOAD_FROM_FILE  : boolean := false; -- whether to load memory content from file
+        DUMP_TO_FILE    : boolean := false; -- whether to store memory content to a file
+        INPUT_FILENAME  : string  := "input_fjel.txt"; -- name of a file to be loaded
+        OUTPUT_FILENAME : string  := "output_fjel.txt" -- name of a file to be dumped
     );
     port(
         clkIn                                : in    std_logic;
@@ -32,7 +32,8 @@ entity sdram_model is
         isInitializedOut                     : out   boolean := false;
         simEndedIn                           : in    boolean
     );
-    constant SDRAM_ALERT_ID : AlertLogIDType := GetAlertLogID("SDRAM", ALERTLOG_BASE_ID);
+    constant SDRAM_ALERT_ID        : AlertLogIDType := GetAlertLogID("SDRAM", ALERTLOG_BASE_ID);
+    constant MEMORY_MODEL_ALERT_ID : AlertLogIDType := GetAlertLogID("Memory Model", SDRAM_ALERT_ID);
 end entity sdram_model;
 
 architecture model of sdram_model is
@@ -56,6 +57,10 @@ architecture model of sdram_model is
     -- input cmd/addr latch (register)
     signal inputReg : Input_Latch_R;
 begin
+    -- initialize memory model in shared variable
+    memoryModel.MemInit(ADDR_WIDTH, DATA_WIDTH);
+    memoryModel.SetAlertLogID(MEMORY_MODEL_ALERT_ID);
+
     -- mask data according to dqm
     -- if mask bit is low, allow data to be read from target byte
     dataIo <= mask_data(dataOutPipeline(0), dataInPipeline(tDQZ - 1).dqm);
@@ -105,7 +110,6 @@ begin
     end block decodeBlock;
 
     ctrlBlock : block
-
         -- TODO: is the upper counter limit OK?
         type Bank_State_Helper_R is record
             counting           : boolean;
@@ -134,8 +138,7 @@ begin
 
     begin
         bankCtrl : process(clkInternal)
-            -- store timings
-
+            -- state regs
             -- times bank state changes
             variable bankCounters  : Bank_Helpers_T := (others => (counting => false, counter => 0, scheduledPrecharge => false));
             -- times subsequent active commands
@@ -324,61 +327,30 @@ begin
 
         -- main controlling process
         mainCtrl : process
-            type Mem_Row_T is array (0 to 2**COL_ADDR_WIDTH - 1) of bit_vector(DATA_WIDTH - 1 downto 0);
-            type Mem_Row_Ptr_T is access Mem_Row_T;
-            type Mem_Bank_T is array (0 to 2**ROW_ADDR_WIDTH - 1) of Mem_Row_Ptr_T;
-            type Mem_Bank_Array_T is array (Bank_Ptr_T) of Mem_Bank_T;
-
-            -- memory data storage
-            variable bankData : Mem_Bank_Array_T;
-
-            -- helper memory procedures
-            procedure init_mem(bank : in Bank_Ptr_T; row : in Row_Ptr_T) is
-            begin
-                if bankData(bank)(row) = NULL then
-                    bankData(bank)(row) := new Mem_Row_T;
-                    for col in Col_Ptr_T loop
-                        bankData(bank)(row)(col) := (others => '0');
-                    end loop;
-                end if;
-            end procedure init_mem;
-
             procedure write_mem(bank : in Bank_Ptr_T; row : in Row_Ptr_T; col : in Col_Ptr_T; data : in Data_T; dqm : in std_logic_vector(1 downto 0)) is
+                variable fullAddr : Full_Addr_T := addr_ptr_to_addr(bank, row, col);
+                variable currData : Data_T      := memoryModel.MemRead(fullAddr);
             begin
                 Log(SDRAM_ALERT_ID, "Writing to Bank: " & to_string(bank) & ", Row: " & to_string(row) & ", Col: " & to_string(col) & ", Dqm: " & to_bstring(dqm) & ", Data: " & to_hstring(data), DEBUG);
 
-                -- if all the data is masked or data is all zerores and curr row is not initialized
-                -- we don't have to write anything
-                if not ((data = (data'range => '0') and bankData(bank)(row) = NULL) or dqm = (dqm'range => '1')) then
-                    init_mem(bank, row);
-                    for i in dqm'range loop
-                        -- mask data according to dqm
-                        -- if mask bit is low, allow writing to target byte
-                        if dqm(i) = '0' then
-                            bankData(bank)(row)(col)(((i + 1) * 8) - 1 downto i * 8) := to_bitvector(data(((i + 1) * 8) - 1 downto i * 8));
-                        end if;
-                    end loop;
-                end if;
+                for i in dqm'range loop
+                    -- mask data according to dqm
+                    -- if mask bit is low, allow writing to target byte
+                    if dqm(i) = '0' then
+                        currData(((i + 1) * 8) - 1 downto i * 8) := data(((i + 1) * 8) - 1 downto i * 8);
+                    end if;
+                end loop;
+
+                memoryModel.MemWrite(fullAddr, currData);
             end procedure write_mem;
 
             impure function read_mem(bank : in Bank_Ptr_T; row : in Row_Ptr_T; col : in Col_Ptr_T) return Data_T is
+                variable fullAddr : Full_Addr_T := addr_ptr_to_addr(bank, row, col);
             begin
                 Log(SDRAM_ALERT_ID, "Reading from Bank: " & to_string(bank) & ", Row: " & to_string(row) & ", Col: " & to_string(col), DEBUG);
 
-                if bankData(bank)(row) = NULL then
-                    return (others => '0');
-                else
-                    return to_slv(bankData(bank)(row)(col));
-                end if;
+                return memoryModel.MemRead(fullAddr);
             end function read_mem;
-
-            -- tmp
-            variable loadDone                                 : boolean := false;
-            file inputFile, outputFile                        : text;
-            variable inputLine, outputLine                    : line;
-            variable bankCount, rowCount, colCount, dataWidth : natural;
-            variable rowUsed                                  : boolean;
-            variable tmpCol                                   : bit_vector(DATA_WIDTH - 1 downto 0);
 
             -- state variables
             variable currCol      : Col_Ptr_T                            := 0;
@@ -404,41 +376,9 @@ begin
             variable data                           : Data_T     := (others => 'Z');
             variable isPrechargingAll, isRefreshing : boolean    := false;
         begin
-            if LOAD_FROM_FILE and not loadDone then
-                -- run only once
-                loadDone := true;
-
+            if LOAD_FROM_FILE then
                 report "Reading (sparse) memory from file, please wait..." severity note;
-                file_open(inputFile, INPUT_FILE_NAME, read_mode);
-
-                while not endfile(inputFile) loop
-                    readline(inputFile, inputLine);
-
-                    read(inputLine, bankCount);
-                    assert bankCount = BANK_COUNT;
-                    read(inputLine, rowCount);
-                    assert rowCount = 2**ROW_ADDR_WIDTH;
-                    read(inputLine, colCount);
-                    assert colCount = 2**COL_ADDR_WIDTH;
-                    read(inputLine, dataWidth);
-                    assert dataWidth = DATA_WIDTH;
-
-                    for bank in 0 to BANK_COUNT - 1 loop
-                        for row in Row_Ptr_T loop
-                            readline(inputFile, inputLine);
-                            read(inputLine, rowUsed);
-
-                            if rowUsed then
-                                init_mem(bank, row);
-                                for col in Col_Ptr_T loop
-                                    read(inputLine, tmpCol);
-                                    bankData(bank)(row)(col) := tmpCol;
-                                end loop;
-                            end if;
-                        end loop;
-                    end loop;
-                end loop;
-                file_close(inputFile);
+                memoryModel.FileReadH(INPUT_FILENAME);
             end if;
 
             while not simEndedIn loop
@@ -641,29 +581,8 @@ begin
             end loop;
 
             if DUMP_TO_FILE and simEndedIn then
-                Log(SDRAM_ALERT_ID, "Dumping (sparse) memory to file: """ & OUTPUT_FILE_NAME & """, please wait ...", INFO);
-                file_open(outputFile, OUTPUT_FILE_NAME, write_mode);
-
-                write(outputLine, BANK_COUNT);
-                write(outputLine, 2**ROW_ADDR_WIDTH);
-                write(outputLine, 2**COL_ADDR_WIDTH);
-                write(outputLine, DATA_WIDTH);
-                writeline(outputFile, outputLine);
-
-                for bank in Bank_Ptr_T loop
-                    for row in Row_Ptr_T loop
-                        if bankData(bank)(row) = NULL then
-                            write(outputLine, false);
-                        else
-                            write(outputLine, true);
-                            for col in Col_Ptr_T loop
-                                write(outputLine, bankData(bank)(row)(col));
-                            end loop;
-                        end if;
-                        writeline(outputFile, outputLine);
-                    end loop;
-                end loop;
-                file_close(outputFile);
+                Log(SDRAM_ALERT_ID, "Dumping (sparse) memory to file: """ & OUTPUT_FILENAME & """, please wait ...", INFO);
+                memoryModel.FileWriteH(OUTPUT_FILENAME);
             end if;
 
             wait;

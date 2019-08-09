@@ -1,10 +1,7 @@
--- Testbench automatically generated online
--- at http://vhdl.lapinoo.net
--- Generation date : 22.7.2019 12:25:07 GMT
-
 library ieee;
 use ieee.std_logic_1164.all;
 use ieee.numeric_std.all;
+
 use work.sdram_pkg.all;
 use work.sdram_ctrl_pkg.all;
 
@@ -56,7 +53,7 @@ architecture tb of sdram_ctrl_tb is
 begin
     dut : entity work.sdram_ctrl_top
         generic map(
-            PAGES_REQUIRED         => ROW_MAX,
+            PAGES_REQUIRED  => ROW_MAX,
             READ_BURST_LEN  => READ_BURST_LEN,
             WRITE_BURST_LEN => WRITE_BURST_LEN
         )
@@ -97,17 +94,12 @@ begin
 
     -- Clock generation
     tbClk <= not tbClk after CLK_PERIOD / 2 when tbSimEnded /= '1' else '0';
-
-    -- EDIT: Check that clkIn is really your main clock signal
     clkIn <= tbClk;
 
     stimuli : process
     begin
-        -- EDIT Adapt initialization as needed
         clkStable <= '0';
 
-        -- Reset generation
-        -- EDIT: Check that rstAsyncIn is really your reset signal
         rstAsyncIn <= '1';
         wait for 10 ns;
         rstAsyncIn <= '0';
@@ -131,6 +123,18 @@ begin
     end process;
 
     testProc : process(clkIn, rstAsyncIn, cmdReadyOut)
+        constant PLAN_LENGTH : natural := 10;
+        type Test_Plan_T is array (0 to PLAN_LENGTH - 1) of Ctrl_Cmd_T;
+
+        constant TEST_PLAN : Test_Plan_T := (
+            Write, Write, Read, Read, Refresh,
+            Refresh, Read, Write, Refresh, Write
+        );
+
+        variable planPtr : natural range 0 to PLAN_LENGTH - 1 := 0;
+
+        variable waitCounter : natural := 0;
+
         variable cmdCounter : natural   := 10;
         variable randomGen  : RandomPType;
         variable dataPtr    : Col_Ptr_T := 0;

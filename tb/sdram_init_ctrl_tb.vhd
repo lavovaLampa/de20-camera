@@ -45,7 +45,7 @@ begin
     sdramModel : entity work.sdram_model
         generic map(
             LOAD_FROM_FILE => false,
-            DUMP_TO_FILE   => false
+            DUMP_TO_FILE   => true
         )
         port map(
             clkIn              => clkIn,
@@ -93,7 +93,7 @@ begin
         severity error;
 
         -- Stop the clock and hence terminate the simulation
-        simEnded   <= true;
+        simEnded <= true;
         tbSimEnded <= '1';
         wait;
     end process;

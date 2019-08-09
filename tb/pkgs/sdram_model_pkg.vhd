@@ -1,9 +1,18 @@
 library ieee;
 use ieee.std_logic_1164.all;
 use ieee.numeric_std.all;
+
 use work.sdram_pkg.all;
 
+library osvvm;
+use osvvm.MemoryPkg.all;
+
 package sdram_model_pkg is
+    -- memory model in package to be available for predictable initialization from testbench
+    shared variable memoryModel : MemoryPType;
+
+    subtype Full_Addr_T is std_logic_vector(ADDR_WIDTH - 1 downto 0);
+
     type Bank_State_R is record
         state : Bank_State_T;
         row   : Row_Ptr_T;
@@ -36,6 +45,7 @@ package sdram_model_pkg is
     pure function bank_transition_valid(currState : Bank_State_T; nextState : Bank_State_T) return boolean;
     pure function to_safe_natural(val : unsigned) return natural;
     pure function mask_data(data : Data_T; dqm : Dqm_T) return Data_T;
+    pure function addr_ptr_to_addr(bank : Bank_Ptr_T; row : Row_Ptr_T; col : Col_Ptr_T) return Full_Addr_T;
 
     -- return number of cycles required for bank to transition from currState to nextState
     pure function bank_transition_delay(currState : Bank_State_T; nextState : Bank_State_T) return natural;
@@ -156,4 +166,12 @@ package body sdram_model_pkg is
             severity error;
         end if;
     end function bank_transition_delay;
+
+    pure function addr_ptr_to_addr(bank : Bank_Ptr_T; row : Row_Ptr_T; col : Col_Ptr_T) return Full_Addr_T is
+        variable bankAddr : Bank_Addr_T := to_unsigned(bank, Bank_Addr_T'length);
+        variable rowAddr  : Row_Addr_T  := to_unsigned(row, Row_Addr_T'length);
+        variable colAddr  : Col_Addr_T  := to_unsigned(col, Col_Addr_T'length);
+    begin
+        return std_logic_vector(bankAddr) & std_logic_vector(rowAddr) & std_logic_vector(colAddr);
+    end function addr_ptr_to_addr;
 end package body sdram_model_pkg;

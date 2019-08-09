@@ -2,8 +2,8 @@ library ieee;
 use ieee.std_logic_1164.all;
 use ieee.numeric_std.all;
 
-use work.sdram_ctrl_pkg.all;
 use work.sdram_pkg.all;
+use work.sdram_ctrl_pkg.all;
 use work.sdram_model_pkg.to_safe_natural;
 
 library osvvm;

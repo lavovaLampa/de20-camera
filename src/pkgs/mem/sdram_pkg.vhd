@@ -7,28 +7,32 @@ library osvvm;
 context osvvm.OsvvmContext;
 
 package sdram_pkg is
-    -- input clk period
+    -- input clk period (required for wait cycle computation)
     constant CLK_PERIOD : time := 10 ns;
 
     -- sdram port widths
-    constant BANK_ADDR_WIDTH : natural := 2;
-    constant ROW_ADDR_WIDTH  : natural := 12;
-    constant COL_ADDR_WIDTH  : natural := 8;
-    constant DATA_WIDTH      : natural := 16;
-    constant DQM_WIDTH       : natural := DATA_WIDTH / 8;
+    constant BANK_ADDR_WIDTH : positive := 2;
+    constant ROW_ADDR_WIDTH  : positive := 12;
+    constant COL_ADDR_WIDTH  : positive := 8;
+    constant DATA_WIDTH      : positive := 16;
+    constant DQM_WIDTH       : positive := DATA_WIDTH / 8;
 
     -- useful computed constants
-    constant BANK_COUNT : natural := 2**BANK_ADDR_WIDTH;
-    constant PAGE_LEN   : natural := 2**COL_ADDR_WIDTH;
+    constant ADDR_WIDTH      : positive := ROW_ADDR_WIDTH + COL_ADDR_WIDTH + BANK_ADDR_WIDTH; -- full addressable space width
+    constant PORT_ADDR_WIDTH : positive := maximum(ROW_ADDR_WIDTH, maximum(COL_ADDR_WIDTH, BANK_ADDR_WIDTH)); -- widest address
+    constant BANK_COUNT      : positive := 2**BANK_ADDR_WIDTH;
+    constant PAGE_LEN        : positive := 2**COL_ADDR_WIDTH;
 
     -- i/o types
-    subtype Addr_T is unsigned(ROW_ADDR_WIDTH - 1 downto 0);
+    subtype Addr_T is unsigned(PORT_ADDR_WIDTH - 1 downto 0);
+    subtype Row_Addr_T is unsigned(ROW_ADDR_WIDTH - 1 downto 0);
     subtype Col_Addr_T is unsigned(COL_ADDR_WIDTH - 1 downto 0);
     subtype Bank_Addr_T is unsigned(BANK_ADDR_WIDTH - 1 downto 0);
     subtype Data_T is std_logic_vector(DATA_WIDTH - 1 downto 0);
     subtype Dqm_T is std_logic_vector(DQM_WIDTH - 1 downto 0);
 
     -- internal types/data ranges
+    subtype Input_Addr_Ptr_T is natural range 0 to 2**PORT_ADDR_WIDTH - 1;
     subtype Row_Ptr_T is natural range 0 to 2**ROW_ADDR_WIDTH - 1;
     subtype Col_Ptr_T is natural range 0 to 2**COL_ADDR_WIDTH - 1;
     subtype Bank_Ptr_T is natural range 0 to BANK_COUNT - 1;
@@ -42,7 +46,7 @@ package sdram_pkg is
     -- Mode register burst types
     type Burst_Type_T is (Interleaved, Sequential);
     -- Mode register burst length
-    subtype Burst_Length_T is natural range 0 to 2**ROW_ADDR_WIDTH;
+    subtype Burst_Length_T is natural range 0 to 2**COL_ADDR_WIDTH;
     -- Mode register latency mode
     subtype Latency_Mode_T is natural range 2 to 3;
     -- Mode register write burst mode
