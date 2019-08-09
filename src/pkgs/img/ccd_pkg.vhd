@@ -11,8 +11,8 @@ package ccd_pkg is
     constant ACTIVE_WIDTH  : natural := 2592;
     constant ACTIVE_HEIGHT : natural := 1944;
 
-    constant OUTPUT_WIDTH  : natural := 644;
-    constant OUTPUT_HEIGHT : natural := 484;
+    constant OUTPUT_WIDTH  : natural := 84;
+    constant OUTPUT_HEIGHT : natural := 64;
 
     constant DATA_WIDTH : natural := 12;
 
@@ -51,8 +51,8 @@ package ccd_pkg is
     constant CCD_CONFIGURATION : Ccd_Configuration_R := (
         width_start   => 990,
         height_start  => 838,
-        height        => 484,
-        width         => 644,
+        height        => OUTPUT_HEIGHT,
+        width         => OUTPUT_WIDTH,
         is_mirrored   => false,
         hblank        => 1023,
         vblank        => 130,

@@ -17,13 +17,13 @@ entity pixel_shiftreg is
         enableIn          : in  boolean;
         pixelsOut         : out Pixel_Matrix_T
     );
-
-    type Pixel_Shift_Array_T is array (SHIFT_LEN - 1 downto 0) of Pixel_Data_T;
 end entity pixel_shiftreg;
 
 architecture RTL of pixel_shiftreg is
-    signal shiftReg : Pixel_Shift_Array_T := (others => (others => '0'));
+    type Pixel_Shift_Array_T is array (SHIFT_LEN - 1 downto 0) of Pixel_Data_T;
 
+    -- shift register storage array
+    signal shiftReg : Pixel_Shift_Array_T := (others => (others => '0'));
 begin
     shiftProc : process(clkIn, rstAsyncIn)
     begin
@@ -37,13 +37,13 @@ begin
         end if;
     end process shiftProc;
 
-    pixelsOut(0, 0) <= shiftReg(2);
+    pixelsOut(0, 0) <= shiftReg(0);
     pixelsOut(0, 1) <= shiftReg(1);
-    pixelsOut(0, 2) <= shiftReg(0);
-    pixelsOut(1, 0) <= shiftReg(LINE_WIDTH + 2);
+    pixelsOut(0, 2) <= shiftReg(2);
+    pixelsOut(1, 0) <= shiftReg(LINE_WIDTH);
     pixelsOut(1, 1) <= shiftReg(LINE_WIDTH + 1);
-    pixelsOut(1, 2) <= shiftReg(LINE_WIDTH);
-    pixelsOut(2, 0) <= shiftReg((2 * LINE_WIDTH) + 2);
+    pixelsOut(1, 2) <= shiftReg(LINE_WIDTH + 2);
+    pixelsOut(2, 0) <= shiftReg(2 * LINE_WIDTH);
     pixelsOut(2, 1) <= shiftReg((2 * LINE_WIDTH) + 1);
-    pixelsOut(2, 2) <= shiftReg(2 * LINE_WIDTH);
+    pixelsOut(2, 2) <= shiftReg((2 * LINE_WIDTH) + 2);
 end architecture RTL;

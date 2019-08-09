@@ -12,14 +12,15 @@ use work.img_pkg.PIXEL_WIDTH;
 library osvvm;
 context osvvm.OsvvmContext;
 
-entity color_kernel_tb is
+entity image_convolution_tb is
     constant CLK_PERIOD    : time     := 20 ns; -- 50 MHz
+
     constant TEST_HEIGHT   : positive := 62;
     constant TEST_WIDTH    : positive := 82;
     constant HBLANK_CYCLES : positive := 150;
     constant VBLANK_CYCLES : positive := 10;
 
-    constant TEST_KERNEL      : Convolution_Params_T   := (
+    constant TEST_KERNEL      : Convolution_Matrix_T   := (
         (-1, -1, -1),
         (-1, 8, -1),
         (-1, -1, -1)
@@ -28,9 +29,9 @@ entity color_kernel_tb is
     constant TEST_FRAME_COUNT : natural                := 2;
 
     constant KERNEL_TB_ALERT_ID : AlertLogIDType := GetAlertLogID("Color kernel testbench", ALERTLOG_BASE_ID);
-end color_kernel_tb;
+end image_convolution_tb;
 
-architecture tb of color_kernel_tb is
+architecture tb of image_convolution_tb is
     -- common signals
     signal clkIn, rstAsyncIn : std_logic;
 
@@ -55,10 +56,10 @@ begin
     tbClk <= not tbClk after CLK_PERIOD / 2 when tbSimEnded /= '1' else '0';
     clkIn <= tbClk;
 
-    dut : entity work.color_kernel
+    dut : entity work.image_convolution
         generic map(
-            KERNEL_PARAMS_MATRIX => TEST_KERNEL,
-            PRESCALE_AMOUNT      => TEST_PRESCALE
+            CONVOLUTION_KERNEL => TEST_KERNEL,
+            PRESCALE_AMOUNT    => TEST_PRESCALE
         )
         port map(
             clkIn             => clkIn,
@@ -76,7 +77,7 @@ begin
     stimuli : process
         variable randomGen : RandomPType;
     begin
-        --        SetLogEnable(DEBUG, true);
+        --        SetLogEnable(KERNEL_TB_ALERT_ID, DEBUG, true);
         randomGen.InitSeed(randomGen'instance_name);
         -- initialize frame pixel values
         for y in 0 to TEST_HEIGHT - 1 loop
@@ -122,14 +123,14 @@ begin
 
     inputMockProc : process(clkIn, rstAsyncIn)
         -- state registers
-        variable currWidth    : natural             := 0;
-        variable currHeight   : natural             := 0;
-        variable pixelCounter : Rgb_Img_Pixel_Ptr_T := 0;
+        variable currWidth    : natural := 0;
+        variable currHeight   : natural := 0;
+        variable pixelCounter : natural := 0;
     begin
         -- debug signals
-        currHeightDbg   <= currHeight;
-        currWidthDbg    <= currWidth;
-        pixelCounterDbg <= pixelCounter;
+        --        currHeightDbg   <= currHeight;
+        --        currWidthDbg    <= currWidth;
+        --        pixelCounterDbg <= pixelCounter;
 
         if rstAsyncIn = '1' then
             frameEndIn  <= false;
@@ -154,12 +155,17 @@ begin
                 pixelDataIn <= (others => (others => '0'));
             end if;
 
+            if currHeight = TEST_HEIGHT and currWidth = 0 then
+                frameEndIn <= true;
+            end if;
+
             if currWidth >= TEST_WIDTH + HBLANK_CYCLES then
                 currWidth := 0;
 
                 if currHeight >= TEST_HEIGHT + VBLANK_CYCLES then
-                    currHeight   := 0;
-                    frameEndIn   <= true;
+                    currHeight := 0;
+
+                    AlertIfNot(KERNEL_TB_ALERT_ID, pixelCounter = (TEST_HEIGHT * TEST_WIDTH), "Invalid number of pixels has been output");
                     pixelCounter := 0;
                 else
                     currHeight := currHeight + 1;
@@ -176,7 +182,7 @@ begin
         if rstAsyncIn = '1' then
             strobeCheck := false;
         elsif rising_edge(clkIn) then
-            AlertIfNot(KERNEL_TB_ALERT_ID, (newPixelOut xor frameEndOut) or (not newPixelOut and not frameEndOut), "Invalid frame end/new pixel signals state");
+            AlertIf(KERNEL_TB_ALERT_ID, newPixelOut and frameEndOut, "Invalid frame end/new pixel signals state");
 
             if frameEndOut then
                 AlertIf(KERNEL_TB_ALERT_ID, strobeCheck, "Frame end signal active for more than 1 clock cycle (not strobe)");
@@ -214,23 +220,24 @@ begin
         end function saturate_integer;
     begin
         -- debug signals
-        --        currHeightDbg   <= currHeight;
-        --        currWidthDbg    <= currWidth;
-        --        pixelCounterDbg <= pixelCounter;
+        currHeightDbg   <= currHeight;
+        currWidthDbg    <= currWidth;
+        pixelCounterDbg <= pixelCounter;
 
         if rstAsyncIn = '1' then
             currHeight   := 1;
             currWidth    := 1;
             pixelCounter := 0;
         elsif rising_edge(clkIn) then
-
             if newPixelOut then
                 Log(KERNEL_TB_ALERT_ID, "Current location (height, width): " & to_string(currHeight) & " x " & to_string(currWidth), DEBUG);
 
                 for color in Pixel_Color_T loop
+                    Log(KERNEL_TB_ALERT_ID, "Current color: " & to_string(color), DEBUG);
                     currPixelAccu := 0;
                     for y in 0 to 2 loop
                         for x in 0 to 2 loop
+                            Log(KERNEL_TB_ALERT_ID, "Matrix pixel data (y, x): " & to_string(y) & " x " & to_string(x) & " -> " & to_hstring(pixelArray.getPixel(currHeight + y - 1, currWidth + x - 1)(color)), DEBUG);
                             multiplyAccu  := to_integer(pixelArray.getPixel(currHeight + y - 1, currWidth + x - 1)(color)) * TEST_KERNEL(y, x);
                             currPixelAccu := currPixelAccu + multiplyAccu;
                         end loop;
@@ -255,6 +262,7 @@ begin
 
                     Log(KERNEL_TB_ALERT_ID, "New height: " & to_string(currHeight));
                 else
+
                     currWidth := currWidth + 1;
                 end if;
 
@@ -263,7 +271,7 @@ begin
                 Log(KERNEL_TB_ALERT_ID, "Current height: " & to_string(currHeight), DEBUG);
                 Log(KERNEL_TB_ALERT_ID, "Current width: " & to_string(currWidth), DEBUG);
 
-                AlertIfNot(KERNEL_TB_ALERT_ID, currWidth = OUTPUT_WIDTH and currHeight = OUTPUT_HEIGHT,
+                AlertIfNot(KERNEL_TB_ALERT_ID, currWidth = 1 and currHeight = 1,
                            "Invalid height or width at the end of the frame" & LF & "Current location (height, width): " & to_string(currHeight) & " x " & to_string(currWidth));
                 AlertIfNot(KERNEL_TB_ALERT_ID, pixelCounter = (OUTPUT_HEIGHT * OUTPUT_WIDTH),
                            "Incorrect number of pixels received" & LF & "Expected: " & to_string(OUTPUT_HEIGHT * OUTPUT_WIDTH) & LF & "Received: " & to_string(pixelCounter));

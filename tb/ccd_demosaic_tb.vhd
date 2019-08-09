@@ -12,10 +12,10 @@ library osvvm;
 context osvvm.OsvvmContext;
 
 entity ccd_demosaic_tb is
-    constant CLK_PERIOD : time := 20 ns;
+    constant CLK_PERIOD : time := 20 ns; -- 50 MHz
 
-    constant TEST_HEIGHT      : positive := 484;
-    constant TEST_WIDTH       : positive := 644;
+    constant TEST_HEIGHT      : positive := 64;
+    constant TEST_WIDTH       : positive := 84;
     constant TEST_FRAME_COUNT : positive := 3;
 
     constant DEMOSAIC_TB_ALERT_ID : AlertLogIDType := GetAlertLogID("CCD demosaic testbench", ALERTLOG_BASE_ID);
@@ -43,6 +43,10 @@ architecture tb of ccd_demosaic_tb is
     signal pixelOut    : pixel_aggregate_t;
     signal newPixelOut : boolean;
     signal frameEndOut : boolean;
+
+    -- debug signals
+    --    signal currHeightDbg, currWidthDbg : natural;
+    --    signal pixelCounterDbg             : natural;
 
     -- testbench signals
     signal tbClock    : std_logic := '0';
@@ -170,6 +174,11 @@ begin
         variable outWidth, outHeight, outPixelCounter : natural := 0;
         variable pixelCheckArray                      : Pixel_Matrix_Int_T;
     begin
+        -- debug signals
+        --        currHeightDbg   <= outHeight;
+        --        currWidthDbg    <= outWidth;
+        --        pixelCounterDbg <= outPixelCounter;
+
         if rstAsync = '1' then
             outWidth        := 1;
             outHeight       := 1;
@@ -183,8 +192,6 @@ begin
                 for y in 0 to 2 loop
                     for x in 0 to 2 loop
                         pixelCheckArray(y, x) := to_integer(unsigned(pixelArray.getPixel(outHeight + y - 1, outWidth + x - 1)(11 downto 4)));
-                        if frameEndOut then
-                        end if;
 
                         Log(DEMOSAIC_TB_ALERT_ID, "Currently fetching pixel (height, width): " & to_string(outHeight + y - 1) & " x " & to_string(outWidth + x - 1), DEBUG);
                         Log(DEMOSAIC_TB_ALERT_ID, "Data: " & to_hstring(pixelArray.getPixel(outHeight + y - 1, outWidth + x - 1)) & " truncated to: " & to_hstring(to_unsigned(pixelCheckArray(y, x), 8)), DEBUG);
@@ -218,18 +225,21 @@ begin
                 -- computed colors should be equal
                 for color in Pixel_Color_T loop
                     AlertIfNot(DEMOSAIC_TB_ALERT_ID, computedPixel(color) = to_integer(pixelOut(color)),
-                               "Wrong " & to_string(color) & " pixel value received at (height, width): " & to_string(outHeight) & to_string(outWidth) & LF & "Expected: " & to_hstring(to_unsigned(computedPixel(color), 8)) & LF & "Received: " & to_hstring(pixelOut(color)));
+                               "Wrong " & to_string(color) & " pixel value received at (height, width): " & to_string(outHeight) & " x " & to_string(outWidth) & LF & "Expected: " & to_hstring(to_unsigned(computedPixel(color), 8)) & LF & "Received: " & to_hstring(pixelOut(color)));
                 end loop;
 
                 outPixelCounter := outPixelCounter + 1;
 
                 if (outWidth >= NEW_WIDTH) then
                     outWidth := 1;
+
                     if outHeight >= NEW_HEIGHT then
                         outHeight := 1;
                     else
                         outHeight := outHeight + 1;
                     end if;
+
+                    Log(DEMOSAIC_TB_ALERT_ID, "New height: " & to_string(outHeight));
                 else
                     outWidth := outWidth + 1;
                 end if;

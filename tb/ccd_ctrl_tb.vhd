@@ -14,11 +14,12 @@ library osvvm;
 context osvvm.OsvvmContext;
 
 entity ccd_ctrl_tb is
-    constant TEST_HEIGHT          : natural        := 484;
-    constant TEST_WIDTH           : natural        := 644;
-    constant CLK_PERIOD           : time           := 20 ns; -- 50 MHz clock
-    constant TEST_FRAME_COUNT     : natural        := 2;
-    -- real constants are way higher
+    constant CLK_PERIOD : time := 20 ns; -- 50 MHz clock
+
+    constant TEST_HEIGHT      : natural := 64;
+    constant TEST_WIDTH       : natural := 84;
+    constant TEST_FRAME_COUNT : natural := 20;
+
     constant CCD_CTRL_TB_ALERT_ID : AlertLogIDType := GetAlertLogID("Ccd Ctrl TestBench", ALERTLOG_BASE_ID);
 end ccd_ctrl_tb;
 
@@ -112,6 +113,24 @@ begin
         tbSimEnded <= '1';
         wait;
     end process;
+
+    sanityCheckProc : process(pixClk, rstAsyncIn)
+        variable strobeCheck : boolean := false;
+    begin
+        if rstAsyncIn = '1' then
+            strobeCheck := false;
+        elsif rising_edge(pixClk) then
+            AlertIfNot(CCD_CTRL_TB_ALERT_ID, (pixelValid xor frameEndStrobe) or (not pixelValid and not frameEndStrobe), "Invalid frame end/new pixel signals state");
+
+            if frameEndStrobe then
+                AlertIf(CCD_CTRL_TB_ALERT_ID, strobeCheck, "Frame end signal active for more than 1 clock cycle (not strobe)");
+
+                strobeCheck := true;
+            else
+                strobeCheck := false;
+            end if;
+        end if;
+    end process sanityCheckProc;
 
     blankingCheckProc : process(pixClk, nRstAsync)
     begin

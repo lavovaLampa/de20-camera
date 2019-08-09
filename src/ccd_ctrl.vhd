@@ -40,6 +40,7 @@ begin
     severity error;
 
     ctrlProc : process(clkIn, rstAsyncIn)
+        -- remember if we sent the frame end signal already
         variable frameEndStrobe : boolean := false;
     begin
         if rstAsyncIn = '1' then
@@ -55,18 +56,20 @@ begin
 
             frameEndStrobe := false;
         elsif rising_edge(clkIn) then
+            frameEndStrobeOut <= false;
             pixelValidOut     <= currPixelValid;
             hBlankOut         <= hBlank;
             vBlankOut         <= vBlank;
             -- truncate pixel to high 8 bits
             pixelOut          <= unsigned(ccdPixelIn(ccdPixelIn'high downto 4));
-            frameEndStrobeOut <= false;
             pixelCounterOut   <= pixelCounter;
             heightOut         <= currHeight;
             widthOut          <= currWidth;
 
             -- counter logic
             if currPixelValid then
+                frameEndStrobe := false;
+
                 if currWidth >= OUTPUT_WIDTH - 1 then
                     currWidth <= 0;
                     if currHeight < OUTPUT_HEIGHT - 1 then
@@ -88,6 +91,7 @@ begin
             elsif vBlank then
                 if not frameEndStrobe then
                     frameEndStrobeOut <= true;
+                    frameEndStrobe    := true;
                 end if;
 
                 currWidth    <= 0;

@@ -291,7 +291,7 @@ begin
                 CHECK_DATA => false
             )
             port map(
-                testClkIn          => clkIn,
+                tbClkIn          => clkIn,
                 sClkIn             => sClkIn,
                 rstAsyncIn         => rstAsyncIn,
                 dataReceivedOut    => newDataArrived,

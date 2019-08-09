@@ -16,7 +16,7 @@ package kernel_pkg is
 
     subtype Rgb_Img_Width_T is natural range 0 to RGB_IMG_WIDTH - 1;
     subtype Rgb_Img_Height_T is natural range 0 to RGB_IMG_HEIGHT - 1;
-    subtype Rgb_Img_Pixel_Ptr_T is natural range 0 to (RGB_IMG_WIDTH * RGB_IMG_HEIGHT);
+    subtype Rgb_Img_Pixel_Ptr_T is natural range 0 to (RGB_IMG_WIDTH * RGB_IMG_HEIGHT) - 1;
 
     constant PIPELINE_STAGES      : natural := 4;
     -- 17 bit data width should be enough to prevent under/overflows
@@ -37,7 +37,7 @@ package kernel_pkg is
     type Matrix_Aggregate_T is array (Pixel_Color_T) of Pixel_Matrix_T;
 
     -- 5 bit
-    type Convolution_Params_T is array (2 downto 0, 2 downto 0) of integer range -16 to 15;
+    type Convolution_Matrix_T is array (2 downto 0, 2 downto 0) of integer range -16 to 15;
     -- constant to divide (prescale) kernel with (only prescaling by powers of 2)
     subtype Convolution_Prescale_T is integer range -6 to 6;
 

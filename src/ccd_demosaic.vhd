@@ -24,22 +24,27 @@ end entity ccd_demosaic;
 
 architecture RTL of ccd_demosaic is
     -- state registers
-    signal currShiftHeight : Ccd_Active_Height_Ptr_T := 0;
-    signal currShiftWidth  : Ccd_Active_Width_Ptr_T  := 0;
+    signal currShiftHeight              : Ccd_Active_Height_Ptr_T := 0;
+    signal currShiftWidth               : Ccd_Active_Width_Ptr_T  := 0;
+    -- shift signals for one clock to account for shift register delay
+    signal lastPixelValid, lastFrameEnd : boolean                 := false;
 
-    impure function isImageEdge return boolean is
-    begin
-        return currShiftHeight = 0 or currShiftHeight = OUTPUT_HEIGHT - 1 or currShiftWidth = 0 or currShiftWidth = OUTPUT_WIDTH - 1;
-    end function isImageEdge;
+    -- helper state signals
+    signal isImageEdge : boolean;
 begin
+    isImageEdge <= currShiftHeight = 0 or currShiftHeight = OUTPUT_HEIGHT - 1 or currShiftWidth = 0 or currShiftWidth = OUTPUT_WIDTH - 1;
+
     counterProc : process(clkIn, rstAsyncIn)
-        --        variable pixelCounter : Ccd_Active_Pixel_Ptr_T := 0;
     begin
         if rstAsyncIn = '1' then
             currShiftHeight <= 0;
             currShiftWidth  <= 0;
-        --            pixelCounter := 0;
+            lastPixelValid  <= false;
+            lastFrameEnd    <= false;
         elsif rising_edge(clkIn) then
+            lastPixelValid <= pixelValidIn;
+            lastFrameEnd   <= frameEndStrobeIn;
+
             if pixelValidIn then
                 -- current width & height of pixel in shift register
                 if pixelCounterIn > OUTPUT_WIDTH + 1 then
@@ -56,13 +61,10 @@ begin
                     end if;
                 end if;
 
-            --                pixelCounter := pixelCounter + 1;
-
             elsif frameEndStrobeIn then
                 -- reset counters on start of new frame
                 currShiftWidth  <= 0;
                 currShiftHeight <= 0;
-                --                pixelCounter    := 0;
             end if;
         end if;
     end process counterProc;
@@ -93,9 +95,9 @@ begin
                 currColor := get_ccd_pixel_color(currShiftHeight + CCD_CONFIGURATION.height_start, currShiftWidth + CCD_CONFIGURATION.width_start, CCD_CONFIGURATION.is_mirrored);
 
                 -- ignore image edges
-                pipelineReady <= pixelValidIn and not isImageEdge;
+                pipelineReady <= lastPixelValid and not isImageEdge;
                 stageColor    <= currColor;
-                stageFrameEnd <= frameEndStrobeIn;
+                stageFrameEnd <= lastFrameEnd;
 
                 for y in 0 to 2 loop
                     for x in 0 to 2 loop

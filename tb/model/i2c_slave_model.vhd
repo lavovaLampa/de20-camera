@@ -12,7 +12,7 @@ entity i2c_slave_model is
         CHECK_DATA : boolean := false
     );
     port(
-        testClkIn                             : in    std_logic;
+        tbClkIn                               : in    std_logic;
         rstAsyncIn                            : in    std_logic;
         -- i2c i/o
         sClkIn                                : in    std_logic;
@@ -40,13 +40,13 @@ begin
     testDataAggregate <= std_logic_vector(expectedDevAddrIn) & std_logic_vector(expectedDataAddrIn) & expectedDataIn;
 
     -- synchronized to TB clock
-    reportProc : process(testClkIn, rstAsyncIn)
+    reportProc : process(tbClkIn, rstAsyncIn)
         variable lastVal : boolean := false;
     begin
         if rstAsyncIn = '1' then
             dataReceivedOut <= false;
             lastVal         := false;
-        elsif rising_edge(testClkIn) then
+        elsif rising_edge(tbClkIn) then
             -- value changed
             dataReceivedOut <= batchOK and not lastVal;
             lastVal         := batchOK;
