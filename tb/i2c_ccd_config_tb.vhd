@@ -1,7 +1,9 @@
 library ieee;
 use ieee.std_logic_1164.all;
+
 use work.i2c_pkg.all;
-use work.ccd_pkg.all;
+--use work.ccd_pkg.all;
+use work.ccd_config_pkg.all;
 
 entity i2c_ccd_config_tb is
     constant VERBOSE    : boolean := false;
@@ -42,7 +44,6 @@ begin
 
     i2cSlave : entity work.i2c_slave_model
         generic map(
-            DEBUG      => false,
             CHECK_DATA => true
         )
         port map(
@@ -99,9 +100,9 @@ begin
             expectedDataAddr <= CCD_CONFIG(configPtr).addr;
             if slaveDataReceived then
                 if VERBOSE then
-                    report "Config array pointer: " & natural'image(configPtr);
-                    report "Received device address: 0x" & to_hstring(recvDevAddr);
-                    report "Received data address: 0x" & to_hstring(recvDataAddr);
+                    report "Config array pointer: " & to_string(configPtr);
+                    report "Received device address: 0x" & to_hstring(std_logic_vector(recvDevAddr));
+                    report "Received data address: 0x" & to_hstring(std_logic_vector(recvDataAddr));
                     report "Received data: 0x" & to_hstring(recvData);
                 end if;
 

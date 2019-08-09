@@ -15,14 +15,14 @@ end i2c_ctrl_tb;
 
 architecture tb of i2c_ctrl_tb is
 
-    signal clkIn, rstAsyncIn : std_logic := '0';
-    signal enableIn          : boolean   := false;
-    signal dataIn            : I2c_Data_T  := X"0000";
-    signal devAddrIn         : I2c_Addr_T  := X"00";
-    signal dataAddrIn        : I2c_Addr_T  := X"00";
+    signal clkIn, rstAsyncIn : std_logic  := '0';
+    signal enableIn          : boolean    := false;
+    signal dataIn            : I2c_Data_T := X"0000";
+    signal devAddrIn         : I2c_Addr_T := X"00";
+    signal dataAddrIn        : I2c_Addr_T := X"00";
     signal doneOut, errorOut : boolean;
     signal sClkOut           : std_logic;
-    signal sDataIO           : std_logic := 'Z';
+    signal sDataIO           : std_logic  := 'Z';
 
     signal slaveDataReceived         : boolean;
     signal recvDevAddr, recvDataAddr : I2c_Addr_T;
@@ -34,20 +34,19 @@ architecture tb of i2c_ctrl_tb is
 begin
 
     dut : entity work.i2c_ctrl
-        port map(clkIn      => clkIn,
-                 rstAsyncIn => rstAsyncIn,
-                 enableInStrobe   => enableIn,
-                 dataIn     => dataIn,
-                 devAddrIn  => devAddrIn,
-                 dataAddrIn => dataAddrIn,
-                 doneOut    => doneOut,
-                 errorOut   => errorOut,
-                 sClkOut    => sClkOut,
-                 sDataIO    => sDataIO);
+        port map(clkIn          => clkIn,
+                 rstAsyncIn     => rstAsyncIn,
+                 enableInStrobe => enableIn,
+                 dataIn         => dataIn,
+                 devAddrIn      => devAddrIn,
+                 dataAddrIn     => dataAddrIn,
+                 doneOut        => doneOut,
+                 errorOut       => errorOut,
+                 sClkOut        => sClkOut,
+                 sDataIO        => sDataIO);
 
     i2cSlave : entity work.i2c_slave_model
         generic map(
-            DEBUG      => true,
             CHECK_DATA => true
         )
         port map(
