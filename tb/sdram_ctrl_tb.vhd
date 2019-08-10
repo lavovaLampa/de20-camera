@@ -120,11 +120,13 @@ begin
 
         wait until stimuliEnd;
 
+        Log(SDRAM_CTRL_TB_ALERT_ID, "Stimuli end");
         wait for 100 * CLK_PERIOD;
         simEnded <= true;
 
         -- Stop the clock and hence terminate the simulation
         tbSimEnded <= '1';
+        Log(SDRAM_CTRL_TB_ALERT_ID, "Sim ended");
         wait;
     end process;
 
@@ -133,6 +135,15 @@ begin
         signal currCmd      : Ctrl_Cmd_T;
         signal currAddr     : Ctrl_Addr_T;
     begin
+        sanityCheckProc : process(testClk)
+        begin
+            if rstAsync = '1' then
+
+            elsif rising_edge(testClk) then
+
+            end if;
+        end process sanityCheckProc;
+
         inputGenProc : process
             constant PLAN_LENGTH : natural := 10;
             constant MAX_WAIT    : natural := 5;
@@ -155,48 +166,50 @@ begin
             randomGen.InitSeed("inputGenProc");
 
             for addrGen in Addr_Generation_T loop
-                case addrGen is
-                    when SameAddr =>
-                        tmpAddr := randomGen.RandUnsigned(PAGES_REQUIRED - 1, Ctrl_Addr_T'length);
-                        for i in TEST_ADDR_PLAN'range loop
-                            TEST_ADDR_PLAN(i) := tmpAddr;
-                        end loop;
-
-                    when ConsecutiveAddr =>
-                        tmpAddr := randomGen.RandUnsigned(PAGES_REQUIRED - 100, Ctrl_Addr_T'length);
-                        for i in TEST_ADDR_PLAN'range loop
-                            TEST_ADDR_PLAN(i) := tmpAddr;
-                            tmpAddr           := tmpAddr + 1;
-                        end loop;
-
-                    when RandomAddr =>
-                        for i in TEST_ADDR_PLAN'range loop
-                            TEST_ADDR_PLAN(i) := randomGen.RandUnsigned(PAGES_REQUIRED - 1, Ctrl_Addr_T'length);
-                        end loop;
-                end case;
-
-                -- initialize memory to random values for reading tests
-                for i in TEST_ADDR_PLAN'range loop
-                    if TEST_CMD_PLAN(i) = Read then
-                        for col in Col_Ptr_T loop
-                            tmpFullAddr := addr_ptr_to_addr(to_integer(TEST_ADDR_PLAN(i)(1 downto 0)), to_integer(TEST_ADDR_PLAN(i)(Ctrl_Addr_T'high downto 2)), col);
-                            memoryModel.MemWrite(tmpFullAddr, randomGen.RandSlv(Data_T'length));
-                        end loop;
-                    end if;
-                end loop;
-
                 for cmdDelay in 0 to MAX_WAIT - 1 loop
+
+                    case addrGen is
+                        when SameAddr =>
+                            tmpAddr := randomGen.RandUnsigned(PAGES_REQUIRED - 1, Ctrl_Addr_T'length);
+                            for i in TEST_ADDR_PLAN'range loop
+                                TEST_ADDR_PLAN(i) := tmpAddr;
+                            end loop;
+
+                        when ConsecutiveAddr =>
+                            tmpAddr := randomGen.RandUnsigned(PAGES_REQUIRED - 100, Ctrl_Addr_T'length);
+                            for i in TEST_ADDR_PLAN'range loop
+                                TEST_ADDR_PLAN(i) := tmpAddr;
+                                tmpAddr           := tmpAddr + 1;
+                            end loop;
+
+                        when RandomAddr =>
+                            for i in TEST_ADDR_PLAN'range loop
+                                TEST_ADDR_PLAN(i) := randomGen.RandUnsigned(PAGES_REQUIRED - 1, Ctrl_Addr_T'length);
+                            end loop;
+                    end case;
+
+                    -- initialize memory to random values for reading tests
+                    for i in TEST_ADDR_PLAN'range loop
+                        if TEST_CMD_PLAN(i) = Read then
+                            for col in Col_Ptr_T loop
+                                tmpFullAddr := addr_ptr_to_addr(to_integer(TEST_ADDR_PLAN(i)(1 downto 0)), to_integer(TEST_ADDR_PLAN(i)(Ctrl_Addr_T'high downto 2)), col);
+                                memoryModel.MemWrite(tmpFullAddr, randomGen.RandSlv(Data_T'length));
+                            end loop;
+                        end if;
+                    end loop;
+
                     for planPtr in TEST_CMD_PLAN'range loop
                         wait until cmdReady;
-                        Log(SDRAM_CTRL_TB_ALERT_ID,
-                            "Currently testing with parameters (addrType, delay, cmd): " & to_string(addrGen) & ", " & to_string(cmdDelay) & ", " & to_string(TEST_CMD_PLAN(planPtr)), INFO);
-                        Log(SDRAM_CTRL_TB_ALERT_ID,
-                            "Current address: 0x" & to_hstring(TEST_ADDR_PLAN(planPtr)), INFO);
                         if cmdDelay /= 0 then
                             for i in 0 to cmdDelay - 1 loop
                                 wait until rising_edge(testClk);
                             end loop;
                         end if;
+
+                        Log(SDRAM_CTRL_TB_ALERT_ID,
+                            "Currently testing with parameters (addrType, delay, cmd): " & to_string(addrGen) & ", " & to_string(cmdDelay) & ", " & to_string(TEST_CMD_PLAN(planPtr)), INFO);
+                        Log(SDRAM_CTRL_TB_ALERT_ID,
+                            "Current address: 0x" & to_hstring(TEST_ADDR_PLAN(planPtr)), INFO);
 
                         ctrlCmd  <= TEST_CMD_PLAN(planPtr);
                         ctrlAddr <= TEST_ADDR_PLAN(planPtr);
@@ -207,13 +220,18 @@ begin
 
                         Toggle(newCmdToggle);
 
-                        wait until rising_edge(testClk);
+                        wait until rising_edge(testClk) and cmdReady;
                         ctrlCmd <= NoOp;
                     end loop;
                 end loop;
             end loop;
 
+            Log(SDRAM_CTRL_TB_ALERT_ID, "Testcases end");
+
             stimuliEnd <= true;
+            Toggle(newCmdToggle);
+
+            wait;
         end process inputGenProc;
 
         dataReadCheckProc : process
@@ -221,7 +239,7 @@ begin
             variable tmpCmd      : Ctrl_Cmd_T  := NoOp;
             variable tmpAddr     : Ctrl_Addr_T := (others => '0');
         begin
-            while tbSimEnded = '0' loop
+            while not stimuliEnd loop
                 WaitForToggle(newCmdToggle);
 
                 tmpCmd  := currCmd;
@@ -238,6 +256,8 @@ begin
                     end loop;
                 end if;
             end loop;
+
+            wait;
         end process dataReadCheckProc;
 
         -- we have to take care when checking if data were written correctly
@@ -257,7 +277,7 @@ begin
             begin
                 dataArray.initRandomGen;
 
-                while tbSimEnded = '0' loop
+                while not stimuliEnd loop
                     WaitForToggle(newCmdToggle);
                     --                Log(SDRAM_CTRL_TB_ALERT_ID, "Toggle toggled", DEBUG);
                     tmpCmd  := currCmd;
@@ -284,12 +304,16 @@ begin
                         Toggle(checkToggle);
                     end if;
                 end loop;
+
+                Toggle(checkToggle);
+
+                wait;
             end process dataWriteDataGenProc;
 
             dataWriteDataCheckProc : process
                 variable fullAddr : Full_Addr_T;
             begin
-                while tbSimEnded = '0' loop
+                while not stimuliEnd loop
                     WaitForToggle(checkToggle);
                     wait until rising_edge(testClk);
                     -- account for inter-device register delay
@@ -301,6 +325,8 @@ begin
                                    "Data not correctly written to memory at address (addr, col): 0x" & to_hstring(checkAddr) & " x " & to_string(col) & LF & "Data written: " & to_hstring(checkData.getCol(col)) & LF & "Data read: " & to_hstring(memoryModel.MemRead(fullAddr)), FAILURE);
                     end loop;
                 end loop;
+
+                wait;
             end process dataWriteDataCheckProc;
         end block writeBlock;
     end block testBlock;

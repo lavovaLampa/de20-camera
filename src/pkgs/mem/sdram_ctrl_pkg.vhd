@@ -46,8 +46,7 @@ package sdram_ctrl_pkg is
     type Burst_State_R is record
         counter         : Burst_Counter_Range_T;
         burstType       : Burst_Op_T;
-        interleavedRead : boolean;
-        interleaveDelay : natural range 0 to tCAS;
+        interleaveDelay : natural range 0 to tCAS + 2;
     end record Burst_State_R;
 
     type Prefetch_Data_R is record

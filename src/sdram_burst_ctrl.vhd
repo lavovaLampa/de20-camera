@@ -54,7 +54,7 @@ architecture RTL of sdram_burst_ctrl is
 
     -- internal registers
     signal bankState      : Bank_State_Array_T    := (others => (active => false, row => (others => '0')));
-    signal burstState     : Burst_State_R         := (counter => Burst_Counter_Range_T'low, burstType => Write, interleavedRead => false, interleaveDelay => 0);
+    signal burstState     : Burst_State_R         := (counter => Burst_Counter_Range_T'low, burstType => Write, interleaveDelay => 4);
     signal bursting       : boolean               := false;
     signal currState      : Internal_State_T      := Idle;
     signal currPlan       : Execution_Plan_R      := (addr => addr_to_record((others => '0')), cmdPlan => (others => Precharge), cmdPtr => 0, waitForBurstEnd => false);
@@ -117,9 +117,19 @@ begin
             outputEnable <= true;
         end procedure write_data_out;
 
+        impure function get_interleave_delay return natural is
+        begin
+            if burstState.counter >= -tCAS and burstState.burstType = Read then
+                return abs burstState.counter;
+            else
+                return 3;
+            end if;
+        end function get_interleave_delay;
+
         -- start a burst and setup burst state
         procedure burst_start(burstType : in Burst_Op_T) is
-            variable interleavedRead : boolean := (burstType = Read and (bursting and burstState.burstType = Read and burstState.counter >= 0)) or (burstType = Write and burstState.burstType = Read and burstState.counter = -tCAS);
+            variable delay : natural range 0 to 3 := get_interleave_delay;
+            --            variable interleavedRead : boolean := (burstType = Read and (bursting and burstState.burstType = Read and burstState.counter >= 0)) or (burstType = Write and burstState.burstType = Read and burstState.counter = -tCAS);
         begin
             case burstType is
                 when Read =>
@@ -133,8 +143,7 @@ begin
             burstState     <= (
                 counter         => 2**COL_ADDR_WIDTH - 1,
                 burstType       => burstType,
-                interleavedRead => interleavedRead,
-                interleaveDelay => 0
+                interleaveDelay => delay
             );
             prechargeBurst <= false;
         end procedure burst_start;
@@ -331,7 +340,7 @@ begin
         if rstAsyncIn = '1' then
             -- by default mask data
             dqm            <= (others => '1');
-            burstState     <= (counter => Burst_Counter_Range_T'low, burstType => Write, interleavedRead => false, interleaveDelay => 0);
+            burstState     <= (counter => Burst_Counter_Range_T'low, burstType => Write, interleaveDelay => 4);
             currPlan       <= (addr => addr_to_record((others => '0')), cmdPlan => (others => Precharge), cmdPtr => 0, waitForBurstEnd => false);
             currState      <= Idle;
             nextDataOut    <= (others => '0');
@@ -357,10 +366,10 @@ begin
 
                 -- burst state and data handling
                 if burstState.burstType = Read then
-                    if (burstState.counter < PAGE_LEN - (tCAS - tDQZ) and burstState.counter > (tDQZ - tCAS)) or (burstState.interleavedRead and burstState.counter >= PAGE_LEN - (tCAS - tDQZ)) then
+                    if (burstState.counter < PAGE_LEN - (tCAS - tDQZ) or burstState.counter >= PAGE_LEN - (tCAS - tDQZ) + burstState.interleaveDelay) and burstState.counter > (tDQZ - tCAS) then
                         dqm <= (others => '0');
                     end if;
-                    if (burstState.counter >= -tCAS and burstState.counter < PAGE_LEN - tCAS) or (burstState.interleavedRead and burstState.counter >= PAGE_LEN - tCAS) then
+                    if (burstState.counter < PAGE_LEN - tCAS or burstState.counter >= PAGE_LEN - tCAS + burstState.interleaveDelay) and burstState.counter >= -tCAS then
                         dataOut <= memDataIn;
                     end if;
                 elsif burstState.burstType = Write then
@@ -519,15 +528,23 @@ begin
             provideNewDataOut <= false;
         end if;
 
-        -- signalize if new data arrived to be read from memory during read burst
-        if burstState.burstType = Read and burstState.counter >= -tCAS - 1 and burstState.counter < PAGE_LEN - tCAS - 1 then
+        if burstState.burstType = Read and (burstState.counter >= PAGE_LEN - tCAS - 1 + burstState.interleaveDelay or burstState.counter < PAGE_LEN - tCAS - 1) and burstState.counter >= -tCAS - 1 then
             newDataOut <= true;
-        elsif burstState.burstType = Read and burstState.interleavedRead and burstState.counter >= PAGE_LEN - tCAS - 1 + burstState.interleaveDelay then
-            newDataOut <= true;
-        elsif burstState.burstType = Write and burstState.interleavedRead and burstState.counter = PAGE_LEN - 1 then
+        elsif burstState.burstType = Write and burstState.counter >= PAGE_LEN - tCAS - 1 + burstState.interleaveDelay then
             newDataOut <= true;
         else
             newDataOut <= false;
         end if;
+
+        -- signalize if new data arrived to be read from memory during read burst
+        --        if burstState.burstType = Read and burstState.counter >= -tCAS - 1 and burstState.counter < PAGE_LEN - tCAS - 1 then
+        --            newDataOut <= true;
+        --        elsif burstState.burstType = Read and burstState.interleavedRead and burstState.counter >= PAGE_LEN - tCAS - 1 + burstState.interleaveDelay then
+        --            newDataOut <= true;
+        --        elsif burstState.burstType = Write and burstState.interleavedRead and burstState.counter = PAGE_LEN - 1 then
+        --            newDataOut <= true;
+        --        else
+        --            newDataOut <= false;
+        --        end if;
     end process dataFlagProc;
 end architecture RTL;
