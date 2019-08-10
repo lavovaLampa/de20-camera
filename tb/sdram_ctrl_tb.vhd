@@ -135,15 +135,6 @@ begin
         signal currCmd      : Ctrl_Cmd_T;
         signal currAddr     : Ctrl_Addr_T;
     begin
-        sanityCheckProc : process(testClk)
-        begin
-            if rstAsync = '1' then
-
-            elsif rising_edge(testClk) then
-
-            end if;
-        end process sanityCheckProc;
-
         inputGenProc : process
             constant PLAN_LENGTH : natural := 10;
             constant MAX_WAIT    : natural := 5;

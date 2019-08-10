@@ -19,6 +19,8 @@ architecture tb of sdram_init_ctrl_tb is
     signal memIo           : Mem_IO_R;
     signal memData         : Data_T;
     signal initDone        : boolean;
+    signal outputEnable    : boolean;
+    signal memDataIo       : Data_T;
 
     -- sdram model entity i/o signals
     signal memInitialized : boolean;
@@ -29,23 +31,26 @@ architecture tb of sdram_init_ctrl_tb is
     signal tbSimEnded : std_logic := '0';
 
 begin
-    initCtrl : entity work.sdram_init_ctrl
+    memDataIo <= memData when outputEnable else (others => 'Z');
+    
+    tmpCtrl : entity work.sdram_init_ctrl
         generic map(
             MODE_REG => MODE_REG
         )
         port map(
-            clkIn             => clkIn,
-            rstAsyncIn        => rstAsync,
-            clkStableIn       => clkStable,
-            memInitializedOut => initDone,
-            memOut            => memIo,
-            memDataIo         => memData
+            clkIn               => clkIn,
+            rstAsyncIn          => rstAsync,
+            clkStableIn         => clkStable,
+            memInitializedOut   => initDone,
+            memOut              => memIo,
+            memDataOut          => memData,
+            memDataOutputEnable => outputEnable
         );
 
     sdramModel : entity work.sdram_model
         generic map(
             LOAD_FROM_FILE => false,
-            DUMP_TO_FILE   => true
+            DUMP_TO_FILE   => false
         )
         port map(
             clkIn              => clkIn,
@@ -57,7 +62,7 @@ begin
             colAddrStrobeNegIn => memIo.cmdAggregate.colAddrStrobeNeg,
             writeEnableNegIn   => memIo.cmdAggregate.writeEnableNeg,
             dqmIn              => memIo.dqm,
-            dataIo             => memData,
+            dataIo             => memDataIo,
             -- debug signals
             isInitializedOut   => memInitialized,
             simEndedIn         => simEnded
@@ -93,7 +98,7 @@ begin
         severity error;
 
         -- Stop the clock and hence terminate the simulation
-        simEnded <= true;
+        simEnded   <= true;
         tbSimEnded <= '1';
         wait;
     end process;
