@@ -10,22 +10,24 @@ entity sdram_init_ctrl is
         INIT_DELAY_CYCLES : natural := 200 us / CLK_PERIOD
     );
     port(
-        clkIn, rstAsyncIn : in    std_logic;
-        clkStableIn       : in    std_logic;
+        clkIn, rstAsyncIn   : in  std_logic;
+        clkStableIn         : in  std_logic;
         -- functional outputs
-        memInitializedOut : out   boolean := false;
+        memInitializedOut   : out boolean := false;
         -- SDRAM I/O
-        memOut            : out   Mem_IO_R;
-        memDataIo         : inout Data_T
+        memOut              : out Mem_IO_R;
+        memDataOut          : out Data_T;
+        memDataOutputEnable : out boolean
     );
 end entity sdram_init_ctrl;
 
 architecture rtl of sdram_init_ctrl is
     type Internal_State_T is (InitDelay, PrechargeAll, Refresh, LoadModeReg, Done);
-    signal nextIo      : Mem_IO_Aggregate_R                          := nop;
-    signal nextData    : Data_T                                      := (others => 'Z');
-    signal waitCounter : integer range -1 to INIT_DELAY_CYCLES + 100 := 0;
-    signal dqm         : Dqm_T                                       := (others => '1');
+    signal nextIo       : Mem_IO_Aggregate_R                          := nop;
+    signal nextData     : Data_T                                      := (others => '-');
+    signal outputEnable : boolean                                     := false;
+    signal waitCounter  : integer range -1 to INIT_DELAY_CYCLES + 100 := 0;
+    signal dqm          : Dqm_T                                       := (others => '1');
 
     signal clkEnable : std_logic := '0';
 
@@ -33,14 +35,15 @@ architecture rtl of sdram_init_ctrl is
     signal dbgInternalState : Internal_State_T;
 begin
     -- pack mem i/o
-    memOut    <= (
+    memOut              <= (
         cmdAggregate => encode_cmd(nextIo.cmd),
         addr         => nextIo.addr,
         bankSelect   => nextIo.bank,
         clkEnable    => clkEnable,
         dqm          => dqm
     );
-    memDataIo <= nextData;
+    memDataOut          <= nextData;
+    memDataOutputEnable <= outputEnable;
 
     initProc : process(clkIn, rstAsyncIn)
         -- reg
@@ -51,20 +54,22 @@ begin
         if rstAsyncIn = '1' then
             memInitializedOut <= false;
 
-            nextIo      <= nop;
-            nextData    <= (others => 'Z');
-            dqm         <= (others => '1');
-            waitCounter <= INIT_DELAY_CYCLES;
-            clkEnable   <= '0';
+            nextIo       <= nop;
+            nextData     <= (others => '-');
+            dqm          <= (others => '1');
+            waitCounter  <= INIT_DELAY_CYCLES;
+            clkEnable    <= '0';
+            outputEnable <= false;
 
             currState      := InitDelay;
             refreshCounter := 2**(ROW_ADDR_WIDTH + 1) - 1;
         elsif rising_edge(clkIn) then
             -- by default send nop command
-            clkEnable <= '1';
-            nextIo    <= nop;
-            nextData  <= (others => 'Z');
-            dqm       <= (others => '1');
+            clkEnable    <= '1';
+            nextIo       <= nop;
+            dqm          <= (others => '1');
+            outputEnable <= false;
+            nextData     <= (others => '-');
 
             if clkStableIn then
                 waitCounter <= waitCounter - 1 when currState /= Done;
@@ -87,10 +92,13 @@ begin
                     when Refresh =>
                         if waitCounter = 0 then
                             if refreshCounter = 0 then
-                                currState   := LoadModeReg;
-                                nextIo      <= load_mode_reg(MODE_REG);
-                                nextData    <= MODE_REG;
-                                dqm         <= (others => '0');
+                                currState := LoadModeReg;
+
+                                nextIo       <= load_mode_reg(MODE_REG);
+                                nextData     <= MODE_REG;
+                                dqm          <= (others => '0');
+                                outputEnable <= true;
+
                                 waitCounter <= cmd_delay(LoadModeReg) - 1;
                             else
                                 refreshCounter := refreshCounter - 1;

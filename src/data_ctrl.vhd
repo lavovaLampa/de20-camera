@@ -330,8 +330,8 @@ begin
             addrIn       => currAddr,
             cmdIn        => currCmd,
             cmdReadyOut  => cmdReady,
-            dataReadyOut => dataReady,
-            nextDataOut  => dataNext,
+            provideNewDataOut => dataReady,
+            newDataOut  => dataNext,
             dataIn       => memWrite,
             dataOut      => memRead,
             -- sdram i/o

@@ -4,41 +4,42 @@ use ieee.numeric_std.all;
 
 use work.sdram_pkg.all;
 use work.sdram_ctrl_pkg.all;
+use work.sdram_model_pkg.all;
+use work.sdram_ctrl_tb_pkg.all;
 
 library osvvm;
 context osvvm.OsvvmContext;
 
 entity sdram_ctrl_tb is
-    constant CLK_PERIOD : time := work.sdram_pkg.CLK_PERIOD;
+    constant CLK_PERIOD : time := work.sdram_pkg.CLK_PERIOD; -- 100 MHz
 
-    constant ROW_MAX         : natural := 1400;
+    -- number of required memory pages (1 page = 256 * 16b = 4096b)
+    constant PAGES_REQUIRED : natural := 1400;
+
+    -- estimated read burst length
     constant READ_BURST_LEN  : natural := 5;
+    -- estimated write burst length
     constant WRITE_BURST_LEN : natural := 4;
+
+    constant SDRAM_CTRL_TB_ALERT_ID : AlertLogIDType := GetAlertLogID("SDRAM ctrl testbench", ALERTLOG_BASE_ID);
 end sdram_ctrl_tb;
 
 architecture tb of sdram_ctrl_tb is
+    -- TODO: how to generate clock? Should I use some phase shift?
     -- common signals
-    signal clkIn      : std_logic;
-    signal rstAsyncIn : std_logic;
+    signal testClk, rstAsync : std_logic;
+    signal clkStable         : std_logic;
 
-    -- FIXME: how to generate clock? Should I use some phase shift?
-    -- clock generation signals
-    signal clkStable : std_logic;
+    -- mem ctrl signals
+    signal ctrlCmd                                   : Ctrl_Cmd_T;
+    signal ctrlAddr                                  : Ctrl_Addr_T;
+    signal ctrlDataIn, ctrlDataOut                   : Data_T;
+    signal ctrlNewData, ctrlProvideNewData, cmdReady : boolean;
 
-    -- ctrl IN
-    signal addrIn       : Ctrl_Addr_T := (others => '0');
-    signal cmdIn        : Ctrl_Cmd_T  := NoOp;
-    signal dataIn       : Data_T      := (others => '0');
-    -- ctrl OUT
-    signal cmdReadyOut  : boolean;
-    signal dataReadyOut : boolean;
-    signal dataOut      : Data_T;
-
-    -- SDRAM I/O
-    signal sdramDataIo : Data_T;
-    signal sdramOut    : Mem_IO_R;
-
-    -- SDRAM model debug signals
+    -- sdram i/o
+    signal sdramDataIo   : Data_T;
+    signal sdramIo       : Mem_IO_R;
+    -- sdram testbench debug signals
     signal isInitialized : boolean;
     signal simEnded      : boolean;
 
@@ -47,70 +48,75 @@ architecture tb of sdram_ctrl_tb is
     signal tbSimEnded : std_logic := '0';
     signal stimuliEnd : boolean   := false;
 
-    -- debug signals
-    signal dataPtrDebug : Col_Ptr_T;
-
 begin
     dut : entity work.sdram_ctrl_top
         generic map(
-            PAGES_REQUIRED  => ROW_MAX,
+            PAGES_REQUIRED  => 1400,
             READ_BURST_LEN  => READ_BURST_LEN,
             WRITE_BURST_LEN => WRITE_BURST_LEN
         )
         port map(
-            clkIn        => clkIn,
-            rstAsyncIn   => rstAsyncIn,
-            addrIn       => addrIn,
-            cmdIn        => cmdIn,
-            cmdReadyOut  => cmdReadyOut,
-            dataReadyOut => dataReadyOut,
-            dataIn       => dataIn,
-            dataOut      => dataOut,
-            sdramDataIo  => sdramDataIo,
-            sdramOut     => sdramOut,
-            clkStableIn  => clkStable
+            clkIn             => testClk,
+            rstAsyncIn        => rstAsync,
+            clkStableIn       => clkStable,
+            -- input
+            addrIn            => ctrlAddr,
+            cmdIn             => ctrlCmd,
+            dataIn            => ctrlDataIn,
+            -- output
+            cmdReadyOut       => cmdReady,
+            provideNewDataOut => ctrlProvideNewData,
+            newDataOut        => ctrlNewData,
+            dataOut           => ctrlDataOut,
+            -- sdram i/o
+            sdramDataIo       => sdramDataIo,
+            sdramOut          => sdramIo
         );
 
     sdramModel : entity work.sdram_model
         generic map(
             LOAD_FROM_FILE => false,
-            DUMP_TO_FILE   => true
+            DUMP_TO_FILE   => false
         )
         port map(
-            clkIn              => clkIn,
-            addrIn             => sdramOut.addr,
+            clkIn              => testClk,
+            addrIn             => sdramIo.addr,
             dataIo             => sdramDataIo,
-            bankSelectIn       => sdramOut.bankSelect,
-            clkEnableIn        => sdramOut.clkEnable,
-            chipSelectNegIn    => sdramOut.cmdAggregate.chipSelectNeg,
-            rowAddrStrobeNegIn => sdramOut.cmdAggregate.rowAddrStrobeNeg,
-            colAddrStrobeNegIn => sdramOut.cmdAggregate.colAddrStrobeNeg,
-            writeEnableNegIn   => sdramOut.cmdAggregate.writeEnableNeg,
-            dqmIn              => sdramOut.dqm,
+            bankSelectIn       => sdramIo.bankSelect,
+            clkEnableIn        => sdramIo.clkEnable,
+            chipSelectNegIn    => sdramIo.cmdAggregate.chipSelectNeg,
+            rowAddrStrobeNegIn => sdramIo.cmdAggregate.rowAddrStrobeNeg,
+            colAddrStrobeNegIn => sdramIo.cmdAggregate.colAddrStrobeNeg,
+            writeEnableNegIn   => sdramIo.cmdAggregate.writeEnableNeg,
+            dqmIn              => sdramIo.dqm,
             -- debug signals
             isInitializedOut   => isInitialized,
             simEndedIn         => simEnded
         );
 
     -- Clock generation
-    tbClk <= not tbClk after CLK_PERIOD / 2 when tbSimEnded /= '1' else '0';
-    clkIn <= tbClk;
+    tbClk   <= not tbClk after CLK_PERIOD / 2 when tbSimEnded /= '1' else '0';
+    testClk <= tbClk;
 
     stimuli : process
     begin
         clkStable <= '0';
 
-        rstAsyncIn <= '1';
-        wait for 10 ns;
-        rstAsyncIn <= '0';
-        wait for 100 ns;
-        clkStable  <= '1';
+        rstAsync <= '1';
+        wait for 10 * CLK_PERIOD;
+        rstAsync <= '0';
+        wait for 10 * CLK_PERIOD;
 
-        wait until cmdReadyOut;
+        wait for 15 * CLK_PERIOD;
+        clkStable <= '1';
+
+        wait until cmdReady;
         AlertIf(not isInitialized, "Controller is ready for command even though the SDRAM is not initialized properly", ERROR);
 
-        SetLogEnable(DEBUG, true);
-        SetLogEnable(INFO, true);
+        --        SetLogEnable(DEBUG, true);
+        --        SetLogEnable(INFO, true);
+        SetLogEnable(SDRAM_CTRL_TB_ALERT_ID, DEBUG, false);
+        SetLogEnable(SDRAM_CTRL_TB_ALERT_ID, INFO, true);
 
         wait until stimuliEnd;
 
@@ -122,90 +128,180 @@ begin
         wait;
     end process;
 
-    testProc : process(clkIn, rstAsyncIn, cmdReadyOut)
-        constant PLAN_LENGTH : natural := 10;
-        type Test_Plan_T is array (0 to PLAN_LENGTH - 1) of Ctrl_Cmd_T;
-
-        constant TEST_PLAN : Test_Plan_T := (
-            Write, Write, Read, Read, Refresh,
-            Refresh, Read, Write, Refresh, Write
-        );
-
-        variable planPtr : natural range 0 to PLAN_LENGTH - 1 := 0;
-
-        variable waitCounter : natural := 0;
-
-        variable cmdCounter : natural   := 10;
-        variable randomGen  : RandomPType;
-        variable dataPtr    : Col_Ptr_T := 0;
-
-        type Data_Array_T is array (Col_Ptr_T) of Data_T;
-        variable dataArray : Data_Array_T;
+    testBlock : block
+        signal newCmdToggle : std_logic;
+        signal currCmd      : Ctrl_Cmd_T;
+        signal currAddr     : Ctrl_Addr_T;
     begin
-        if rstAsyncIn = '1' then
-            stimuliEnd <= false;
-            cmdCounter := 10;
-            dataPtr    := 0;
+        inputGenProc : process
+            constant PLAN_LENGTH : natural := 10;
+            constant MAX_WAIT    : natural := 5;
 
-            randomGen.InitSeed(randomGen'instance_name);
-            for i in Col_Ptr_T loop
-                dataArray(i) := randomGen.RandSlv(16);
+            type Test_Plan_T is array (0 to PLAN_LENGTH - 1) of Ctrl_Cmd_T;
+            type Test_Addr_Plan_T is array (0 to PLAN_LENGTH - 1) of Ctrl_Addr_T;
+            type Addr_Generation_T is (SameAddr, ConsecutiveAddr, RandomAddr);
+
+            -- tests all possible command combinations (ref, write, read) x (ref, write, read)
+            constant TEST_CMD_PLAN  : Test_Plan_T      := (
+                Write, Write, Read, Read, Refresh,
+                Refresh, Read, Write, Refresh, Write
+            );
+            variable TEST_ADDR_PLAN : Test_Addr_Plan_T := (others => (others => '0'));
+
+            variable randomGen   : RandomPType;
+            variable tmpAddr     : Ctrl_Addr_T;
+            variable tmpFullAddr : Full_Addr_T;
+        begin
+            randomGen.InitSeed("inputGenProc");
+
+            for addrGen in Addr_Generation_T loop
+                case addrGen is
+                    when SameAddr =>
+                        tmpAddr := randomGen.RandUnsigned(PAGES_REQUIRED - 1, Ctrl_Addr_T'length);
+                        for i in TEST_ADDR_PLAN'range loop
+                            TEST_ADDR_PLAN(i) := tmpAddr;
+                        end loop;
+
+                    when ConsecutiveAddr =>
+                        tmpAddr := randomGen.RandUnsigned(PAGES_REQUIRED - 100, Ctrl_Addr_T'length);
+                        for i in TEST_ADDR_PLAN'range loop
+                            TEST_ADDR_PLAN(i) := tmpAddr;
+                            tmpAddr           := tmpAddr + 1;
+                        end loop;
+
+                    when RandomAddr =>
+                        for i in TEST_ADDR_PLAN'range loop
+                            TEST_ADDR_PLAN(i) := randomGen.RandUnsigned(PAGES_REQUIRED - 1, Ctrl_Addr_T'length);
+                        end loop;
+                end case;
+
+                -- initialize memory to random values for reading tests
+                for i in TEST_ADDR_PLAN'range loop
+                    if TEST_CMD_PLAN(i) = Read then
+                        for col in Col_Ptr_T loop
+                            tmpFullAddr := addr_ptr_to_addr(to_integer(TEST_ADDR_PLAN(i)(1 downto 0)), to_integer(TEST_ADDR_PLAN(i)(Ctrl_Addr_T'high downto 2)), col);
+                            memoryModel.MemWrite(tmpFullAddr, randomGen.RandSlv(Data_T'length));
+                        end loop;
+                    end if;
+                end loop;
+
+                for cmdDelay in 0 to MAX_WAIT - 1 loop
+                    for planPtr in TEST_CMD_PLAN'range loop
+                        wait until cmdReady;
+                        Log(SDRAM_CTRL_TB_ALERT_ID,
+                            "Currently testing with parameters (addrType, delay, cmd): " & to_string(addrGen) & ", " & to_string(cmdDelay) & ", " & to_string(TEST_CMD_PLAN(planPtr)), INFO);
+                        Log(SDRAM_CTRL_TB_ALERT_ID,
+                            "Current address: 0x" & to_hstring(TEST_ADDR_PLAN(planPtr)), INFO);
+                        if cmdDelay /= 0 then
+                            for i in 0 to cmdDelay - 1 loop
+                                wait until rising_edge(testClk);
+                            end loop;
+                        end if;
+
+                        ctrlCmd  <= TEST_CMD_PLAN(planPtr);
+                        ctrlAddr <= TEST_ADDR_PLAN(planPtr);
+
+                        -- save addr + cmd for data test processes
+                        currCmd  <= TEST_CMD_PLAN(planPtr);
+                        currAddr <= TEST_ADDR_PLAN(planPtr);
+
+                        Toggle(newCmdToggle);
+
+                        wait until rising_edge(testClk);
+                        ctrlCmd <= NoOp;
+                    end loop;
+                end loop;
             end loop;
-        elsif rising_edge(clkIn) then
-            if dataReadyOut then
-                if dataPtr < Col_Ptr_T'high then
-                    dataPtr := dataPtr + 1;
-                else
-                    dataPtr := 0;
+
+            stimuliEnd <= true;
+        end process inputGenProc;
+
+        dataReadCheckProc : process
+            variable tmpFullAddr : Full_Addr_T;
+            variable tmpCmd      : Ctrl_Cmd_T  := NoOp;
+            variable tmpAddr     : Ctrl_Addr_T := (others => '0');
+        begin
+            while tbSimEnded = '0' loop
+                WaitForToggle(newCmdToggle);
+
+                tmpCmd  := currCmd;
+                tmpAddr := currAddr;
+
+                if tmpCmd = Read then
+                    for col in Col_Ptr_T loop
+                        wait until rising_edge(testClk) and ctrlNewData for 20 * CLK_PERIOD;
+                        AlertIfNot(SDRAM_CTRL_TB_ALERT_ID, ctrlNewData, "Didn't receive ""new data ready"" flag after 20 clock cycles", FAILURE);
+
+                        tmpFullAddr := addr_ptr_to_addr(to_integer(tmpAddr(1 downto 0)), to_integer(tmpAddr(Ctrl_Addr_T'high downto 2)), col);
+                        AlertIfNot(SDRAM_CTRL_TB_ALERT_ID, ctrlDataOut = memoryModel.MemRead(tmpFullAddr),
+                                   "Invalid data received at address (addr, col): " & to_hstring(tmpAddr) & " x " & to_string(col) & LF & "Expected: " & to_hstring(memoryModel.MemRead(tmpFullAddr)) & LF & "Received: " & to_hstring(ctrlDataOut), FAILURE);
+                    end loop;
                 end if;
-            else
-                dataPtr := 0;
-            end if;
+            end loop;
+        end process dataReadCheckProc;
 
-            if cmdReadyOut then
-                if cmdCounter = 0 then
-                    stimuliEnd <= true;
-                else
-                    cmdCounter := cmdCounter - 1;
-                end if;
-            end if;
-        end if;
+        -- we have to take care when checking if data were written correctly
+        -- because data are written to memory with a delay,
+        -- so we have to wait after burst ended for tRDL cycles
+        writeBlock : block
+            signal checkToggle : std_logic   := '0';
+            signal checkAddr   : Ctrl_Addr_T := (others => '0');
 
-        dataPtrDebug <= dataPtr;
-        addrIn       <= (others => '0');
-        dataIn       <= dataArray(dataPtr);
+            shared variable checkData : Page_Array_T;
+        begin
+            dataWriteDataGenProc : process
+                variable tmpCmd  : Ctrl_Cmd_T  := NoOp;
+                variable tmpAddr : Ctrl_Addr_T := (others => '0');
 
-        if cmdReadyOut then
-            case cmdCounter is
-                when 10 =>
-                    cmdIn  <= Write;
-                    addrIn <= B"00_0000_0000_0000";
-                when 9 =>
-                    cmdIn  <= Write;
-                    addrIn <= B"00_0000_0000_0001";
-                when 8 =>
-                    cmdIn  <= Read;
-                    addrIn <= B"00_0000_0000_0000";
-                when 7 =>
-                    cmdIn  <= Read;
-                    addrIn <= B"00_0000_0000_0001";
-                when 6 => cmdIn <= Refresh;
-                when 5 => cmdIn <= Refresh;
-                when 4 =>
-                    cmdIn  <= Read;
-                    addrIn <= B"00_0000_0000_0001";
-                when 3 =>
-                    cmdIn  <= Write;
-                    addrIn <= B"00_0000_0000_0010";
-                when 2 => cmdIn <= Refresh;
-                when 1 =>
-                    cmdIn  <= Write;
-                    addrIn <= B"00_0000_0000_0011";
-                when others => cmdIn <= NoOp;
-            end case;
-        else
-            cmdIn <= NoOp;
-        end if;
+                variable dataArray : Page_Array_T;
+            begin
+                dataArray.initRandomGen;
 
-    end process testProc;
+                while tbSimEnded = '0' loop
+                    WaitForToggle(newCmdToggle);
+                    --                Log(SDRAM_CTRL_TB_ALERT_ID, "Toggle toggled", DEBUG);
+                    tmpCmd  := currCmd;
+                    tmpAddr := currAddr;
+
+                    --                    Log(SDRAM_CTRL_TB_ALERT_ID, "Curr parameters (cmd, addr, col): " & to_string(tmpCmd) & ", 0x" & to_hstring(tmpAddr) & ", " & to_string(currCol), DEBUG);
+
+                    if tmpCmd = Write then
+                        -- generate random values for writing to memory
+                        dataArray.generateFullPage;
+                        ctrlDataIn <= dataArray.getCol(0);
+
+                        for col in 1 to Col_Ptr_T'high loop
+                            wait until rising_edge(testClk) and ctrlProvideNewData for 20 * CLK_PERIOD;
+                            AlertIfNot(SDRAM_CTRL_TB_ALERT_ID, ctrlProvideNewData, "Didn't receive ""provide new data"" flag after 20 clock cycles", FAILURE);
+
+                            ctrlDataIn <= dataArray.getCol(col);
+                        end loop;
+
+                        -- there is a delay before data is written to memory
+                        -- so we have to check data only after the delay is over
+                        checkData.initFromFullPage(dataArray.getFullPage);
+                        checkAddr <= tmpAddr;
+                        Toggle(checkToggle);
+                    end if;
+                end loop;
+            end process dataWriteDataGenProc;
+
+            dataWriteDataCheckProc : process
+                variable fullAddr : Full_Addr_T;
+            begin
+                while tbSimEnded = '0' loop
+                    WaitForToggle(checkToggle);
+                    wait until rising_edge(testClk);
+                    -- account for inter-device register delay
+                    wait for (tRDL + 2) * CLK_PERIOD;
+
+                    for col in Col_Ptr_T loop
+                        fullAddr := addr_ptr_to_addr(to_integer(checkAddr(1 downto 0)), to_integer(checkAddr(Ctrl_Addr_T'high downto 2)), col);
+                        AlertIfNot(SDRAM_CTRL_TB_ALERT_ID, memoryModel.MemRead(fullAddr) = checkData.getCol(col),
+                                   "Data not correctly written to memory at address (addr, col): 0x" & to_hstring(checkAddr) & " x " & to_string(col) & LF & "Data written: " & to_hstring(checkData.getCol(col)) & LF & "Data read: " & to_hstring(memoryModel.MemRead(fullAddr)), FAILURE);
+                    end loop;
+                end loop;
+            end process dataWriteDataCheckProc;
+        end block writeBlock;
+    end block testBlock;
 end tb;
