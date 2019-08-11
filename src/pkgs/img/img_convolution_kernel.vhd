@@ -7,12 +7,10 @@ use work.img_pkg.Pixel_Color_T;
 use work.img_pkg.Pixel_Matrix_T;
 use work.img_pkg.Pixel_Aggregate_T;
 
-package kernel_pkg is
+package img_convolution_pkg is
     -- demosaiced image resolution
-    --    constant RGB_IMG_WIDTH  : natural := OUTPUT_WIDTH - 2;
-    --    constant RGB_IMG_HEIGHT : natural := OUTPUT_HEIGHT - 2;
-    constant RGB_IMG_HEIGHT : natural := 62;
-    constant RGB_IMG_WIDTH  : natural := 82;
+    constant RGB_IMG_WIDTH  : natural := OUTPUT_WIDTH - 2;
+    constant RGB_IMG_HEIGHT : natural := OUTPUT_HEIGHT - 2;
 
     subtype Rgb_Img_Width_T is natural range 0 to RGB_IMG_WIDTH - 1;
     subtype Rgb_Img_Height_T is natural range 0 to RGB_IMG_HEIGHT - 1;
@@ -47,9 +45,9 @@ package kernel_pkg is
     end protected Rgb_Img_Pixel_Array_T;
 
     function to_saturated_unsigned(val : signed; outLen : natural) return unsigned;
-end package kernel_pkg;
+end package img_convolution_pkg;
 
-package body kernel_pkg is
+package body img_convolution_pkg is
     type Rgb_Img_Pixel_Array_T is protected body
         type Rgb_Img_Pixel_Matrix_T is array (Rgb_Img_Height_T, Rgb_Img_Width_T) of Pixel_Aggregate_T;
 
@@ -80,4 +78,4 @@ package body kernel_pkg is
         end if;
         return temp;
     end function to_saturated_unsigned;
-end package body kernel_pkg;
+end package body img_convolution_pkg;

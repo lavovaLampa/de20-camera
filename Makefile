@@ -13,7 +13,7 @@ IMPORT_OPTS = $(COMMON_OPTS)
 MAKE_OPTS = $(COMMON_OPTS) -g -Pwork
 RUN_OPTS = --wave=$(WORK_DIR)/$<.ghw
 
-targets = sdram_init_ctrl ccd_ctrl image_convolution i2c_ccd_config i2c_ctrl sdram_ctrl ccd_demosaic data_ctrl
+targets = sdram_init_ctrl ccd_ctrl img_convolution i2c_ccd_config i2c_ctrl sdram_ctrl ccd_demosaic data_ctrl
 testbenches = $(foreach target, $(targets), $(target)_tb)
 runnables = $(foreach target, $(targets), $(target)_test)
 

@@ -528,6 +528,7 @@ begin
             provideNewDataOut <= false;
         end if;
 
+        -- signalize if new data arrived to be read from memory during read burst
         if burstState.burstType = Read and (burstState.counter >= PAGE_LEN - tCAS - 1 + burstState.interleaveDelay or burstState.counter < PAGE_LEN - tCAS - 1) and burstState.counter >= -tCAS - 1 then
             newDataOut <= true;
         elsif burstState.burstType = Write and burstState.counter >= PAGE_LEN - tCAS - 1 + burstState.interleaveDelay then
@@ -536,15 +537,5 @@ begin
             newDataOut <= false;
         end if;
 
-        -- signalize if new data arrived to be read from memory during read burst
-        --        if burstState.burstType = Read and burstState.counter >= -tCAS - 1 and burstState.counter < PAGE_LEN - tCAS - 1 then
-        --            newDataOut <= true;
-        --        elsif burstState.burstType = Read and burstState.interleavedRead and burstState.counter >= PAGE_LEN - tCAS - 1 + burstState.interleaveDelay then
-        --            newDataOut <= true;
-        --        elsif burstState.burstType = Write and burstState.interleavedRead and burstState.counter = PAGE_LEN - 1 then
-        --            newDataOut <= true;
-        --        else
-        --            newDataOut <= false;
-        --        end if;
     end process dataFlagProc;
 end architecture RTL;

@@ -3,7 +3,7 @@ use ieee.std_logic_1164.all;
 use ieee.numeric_std.all;
 
 use work.ccd_pkg.all;
-use work.kernel_pkg.all;
+use work.img_convolution_pkg.all;
 use work.img_pkg.Pixel_Aggregate_T;
 use work.img_pkg.Pixel_Data_T;
 use work.img_pkg.Pixel_Color_T;
@@ -12,8 +12,8 @@ use work.img_pkg.PIXEL_WIDTH;
 library osvvm;
 context osvvm.OsvvmContext;
 
-entity image_convolution_tb is
-    constant CLK_PERIOD    : time     := 20 ns; -- 50 MHz
+entity img_convolution_tb is
+    constant CLK_PERIOD : time := 20 ns; -- 50 MHz
 
     constant TEST_HEIGHT   : positive := 62;
     constant TEST_WIDTH    : positive := 82;
@@ -29,9 +29,9 @@ entity image_convolution_tb is
     constant TEST_FRAME_COUNT : natural                := 2;
 
     constant KERNEL_TB_ALERT_ID : AlertLogIDType := GetAlertLogID("Color kernel testbench", ALERTLOG_BASE_ID);
-end image_convolution_tb;
+end img_convolution_tb;
 
-architecture tb of image_convolution_tb is
+architecture tb of img_convolution_tb is
     -- common signals
     signal clkIn, rstAsyncIn : std_logic;
 
@@ -56,7 +56,7 @@ begin
     tbClk <= not tbClk after CLK_PERIOD / 2 when tbSimEnded /= '1' else '0';
     clkIn <= tbClk;
 
-    dut : entity work.image_convolution
+    dut : entity work.img_convolution
         generic map(
             CONVOLUTION_KERNEL => TEST_KERNEL,
             PRESCALE_AMOUNT    => TEST_PRESCALE

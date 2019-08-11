@@ -6,11 +6,13 @@ use ieee.math_real.all;
 use work.ccd_pkg.CCD_CONFIGURATION;
 use work.data_ctrl_pkg.all;
 use work.sdram_ctrl_pkg.all;
+
 use work.img_pkg.Pixel_Aggregate_T;
 use work.img_pkg.Pixel_Data_T;
 use work.img_pkg.Pixel_Color_T;
 use work.img_pkg.IMG_HEIGHT;
 use work.img_pkg.IMG_WIDTH;
+
 use work.sdram_pkg.Data_T;
 use work.sdram_pkg.Col_Ptr_T;
 use work.sdram_pkg.PAGE_LEN;
@@ -20,15 +22,19 @@ library PoC;
 
 entity data_ctrl is
     port(
-        ccdClkIn, vgaClkIn       : in  std_logic;
-        rstAsyncIn               : in  std_logic;
+        ccdClkIn, vgaClkIn, memClkIn : in    std_logic;
+        rstAsyncIn                   : in    std_logic;
         -- write side
-        ccdPixelDataIn           : in  Pixel_Aggregate_T;
-        newPixelIn               : in  boolean;
-        ccdHBlankIn, ccdVBlankIn : in  boolean;
+        ccdPixelDataIn               : in    Pixel_Aggregate_T;
+        newPixelIn, frameEndStrobeIn : in    boolean; -- from convolution kernel
+        ccdHBlankIn, ccdVBlankIn     : in    boolean; -- from ccd ctrl
         -- read side
-        vgaNextPixelIn           : in  boolean;
-        vgaPixelOut              : out Pixel_Aggregate_T
+        vgaNextPixelIn               : in    boolean;
+        vgaPixelOut                  : out   Pixel_Aggregate_T;
+        -- sdram i/o
+        memDataIo                    : inout Data_T;
+        memOut                       : out   Mem_IO_R;
+        memClkStableIn               : in    std_logic
     );
     constant MEM_CELLS_REQUIRED : natural := natural(ceil(real(IMG_HEIGHT * IMG_WIDTH * 3) / 2.0));
     constant PAGES_REQUIRED     : natural := natural(ceil(real(MEM_CELLS_REQUIRED) / real(PAGE_LEN)));
@@ -43,17 +49,16 @@ end entity data_ctrl;
 
 architecture RTL of data_ctrl is
     -- sdram i/o
-    signal sdramDataIo    : Data_T;
-    signal sdramOut       : Mem_IO_R;
-    signal sdramClkStable : std_logic;
+    --    signal sdramDataIo    : Data_T;
+    --    signal sdramOut       : Mem_IO_R;
+    --    signal sdramClkStable : std_logic;
 
     -- sdram-related declarations
-    signal memClk              : std_logic;
-    signal currAddr            : Ctrl_Addr_T;
-    signal currCmd             : Ctrl_Cmd_T;
-    signal cmdReady            : boolean;
-    signal dataReady, dataNext : boolean;
-    signal memRead, memWrite   : Data_T;
+    signal currAddr                    : Ctrl_Addr_T;
+    signal currCmd                     : Ctrl_Cmd_T;
+    signal cmdReady                    : boolean;
+    signal dataReady, dataNextRequired : boolean;
+    signal memRead, memWrite           : Data_T;
 
     -- ccd side declarations
     signal ccdFifo : Fifo_State_R;
@@ -61,10 +66,9 @@ architecture RTL of data_ctrl is
     -- vga side declarations
     signal vgaFifo : Fifo_State_R;
 begin
-
-    ccdWriteProc : process(ccdClkIn, rstAsyncIn, ccdFifo, newPixelIn, ccdPixelDataIn, ccdVBlankIn)
-        variable packedPixel    : Packed_Pixel_T; -- helper variable
-        variable frameEndStrobe : boolean := false; -- reg
+    -- ccd-side fifo write controller
+    ccdWriteProc : process(ccdFifo, newPixelIn, ccdPixelDataIn, frameEndStrobeIn)
+        variable packedPixel : Packed_Pixel_T; -- helper variable
     begin
         -- pack pixel data to be suitable for fifo
         packedPixel := std_logic_vector(ccdPixelDataIn(Red)) & std_logic_vector(ccdPixelDataIn(Green)) & std_logic_vector(ccdPixelDataIn(Blue));
@@ -72,14 +76,14 @@ begin
         -- set pixel data to be input to the write port of ccd FIFO
         if ccdFifo.writePort.data = FRAME_END_FLAG then
             ccdFifo.writePort.data <= X"02_02_02";
-        elsif ccdVBlankIn and not frameEndStrobe then
+        elsif frameEndStrobeIn then
             ccdFifo.writePort.data <= FRAME_END_FLAG;
         else
             ccdFifo.writePort.data <= packedPixel;
         end if;
 
         -- control whether to advance fifo write data pointer
-        if newPixelIn or (ccdVBlankIn and not frameEndStrobe) then
+        if newPixelIn or frameEndStrobeIn then
             assert not ccdFifo.writePort.full
             report "CCD write fifo is full"
             severity error;
@@ -87,17 +91,6 @@ begin
             ccdFifo.writePort.put <= true;
         else
             ccdFifo.writePort.put <= false;
-        end if;
-
-        -- ensure frame end strobe is written out
-        if rstAsyncIn = '1' then
-            frameEndStrobe := false;
-        elsif rising_edge(ccdClkIn) then
-            if ccdVBlankIn then
-                frameEndStrobe := true;
-            elsif newPixelIn and not ccdVBlankIn then
-                frameEndStrobe := false;
-            end if;
         end if;
     end process ccdWriteProc;
 
@@ -110,13 +103,14 @@ begin
         end if;
     end process vgaReadProc;
 
-    memProc : process(memClk, rstAsyncIn, ccdFifo, vgaFifo, cmdReady, ccdHBlankIn, ccdVBlankIn, dataNext, dataReady, memRead)
-        impure function next_addr(currAddr : Ctrl_Addr_T) return Ctrl_Addr_T is
+    -- mem arbiter process
+    memProc : process(memClkIn, rstAsyncIn, ccdFifo, vgaFifo, cmdReady, ccdHBlankIn, ccdVBlankIn, dataNextRequired, dataReady, memRead)
+        impure function next_addr(addr : Ctrl_Addr_T) return Ctrl_Addr_T is
         begin
-            if currAddr = MAX_ADDR then
+            if addr = MAX_ADDR then
                 return (others => '0');
             else
-                return currAddr + 1;
+                return addr + 1;
             end if;
         end function next_addr;
 
@@ -134,6 +128,7 @@ begin
         variable currBurstAddr : Ctrl_Addr_T      := (others => '0');
         variable vgaCounter    : Col_Ptr_T        := 0;
     begin
+        -- mem access scheduling/arbitration
         if cmdReady then
             if (ccdFifo.readPort.fillState > B"001" and ccdHBlankIn) or (ccdVBlankIn and ccdFifo.readPort.valid) then
                 currCmd  <= Write;
@@ -153,7 +148,8 @@ begin
             currAddr <= (others => '-');
         end if;
 
-        if dataNext then
+        -- handle memory writes
+        if dataNextRequired then
             assert ccdFifo.readPort.valid or ccdVBlankIn
             report "Cannot read data from ccd fifo because it's not valid yet";
 
@@ -183,6 +179,7 @@ begin
             memWrite             <= (others => '-');
         end if;
 
+        -- handle memory reads
         if dataReady then
             if currBurstAddr < MAX_ADDR or COL_REMAINDER = 0 or vgaCounter < COL_REMAINDER then
                 assert not vgaFifo.writePort.full
@@ -215,10 +212,10 @@ begin
             writePort     := (addrPtr => (others => '0'), pixelPacking => RedGreen, dataHold => (others => '0'));
             currBurstAddr := (others => '0');
             vgaCounter    := 0;
-        elsif rising_edge(memClk) then
+        elsif rising_edge(memClkIn) then
 
             -- ccd fifo read/mem write side
-            if dataNext then
+            if dataNextRequired then
                 case writePort.pixelPacking is
                     when RedGreen  => writePort.dataHold(15 downto 8) := ccdFifo.readPort.data(7 downto 0);
                     when BlueRed   => writePort.dataHold := ccdFifo.readPort.data(15 downto 0);
@@ -280,7 +277,7 @@ begin
             full       => ccdFifo.writePort.full,
             estate_wr  => ccdFifo.writePort.emptyState,
             -- mem side
-            clkReadIn  => memClk,
+            clkReadIn  => memClkIn,
             -- FIXME: synchronous reset
             rstReadIn  => rstAsyncIn,
             got        => ccdFifo.readPort.got,
@@ -300,7 +297,7 @@ begin
         )
         port map(
             -- mem side
-            clkWriteIn => memClk,
+            clkWriteIn => memClkIn,
             -- FIXME: synchronous reset
             rstWriteIn => rstAsyncIn,
             put        => vgaFifo.writePort.put,
@@ -325,18 +322,20 @@ begin
             WRITE_BURST_LEN => 4
         )
         port map(
-            clkIn        => memClk,
-            rstAsyncIn   => rstAsyncIn,
-            addrIn       => currAddr,
-            cmdIn        => currCmd,
-            cmdReadyOut  => cmdReady,
-            provideNewDataOut => dataReady,
-            newDataOut  => dataNext,
-            dataIn       => memWrite,
-            dataOut      => memRead,
+            clkIn             => memClkIn,
+            rstAsyncIn        => rstAsyncIn,
+            clkStableIn       => memClkStableIn,
+            -- input
+            addrIn            => currAddr,
+            cmdIn             => currCmd,
+            dataIn            => memWrite,
+            -- output
+            cmdReadyOut       => cmdReady,
+            provideNewDataOut => dataNextRequired,
+            newDataOut        => dataReady,
+            dataOut           => memRead,
             -- sdram i/o
-            sdramDataIo  => sdramDataIo,
-            sdramOut     => sdramOut,
-            clkStableIn  => sdramClkStable
+            sdramDataIo       => memDataIo,
+            sdramOut          => memOut
         );
 end architecture RTL;

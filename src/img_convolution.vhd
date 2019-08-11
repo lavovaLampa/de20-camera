@@ -2,7 +2,7 @@ library ieee;
 use ieee.std_logic_1164.all;
 use ieee.numeric_std.all;
 
-use work.kernel_pkg.all;
+use work.img_convolution_pkg.all;
 use work.img_pkg.Pixel_Aggregate_T;
 use work.img_pkg.Pixel_Color_T;
 use work.img_pkg.PIXEL_WIDTH;
@@ -11,7 +11,7 @@ use work.img_pkg.Pixel_Data_T;
 library osvvm;
 context osvvm.OsvvmContext;
 
-entity image_convolution is
+entity img_convolution is
     generic(
         -- edge detection kernel
         constant CONVOLUTION_KERNEL : Convolution_Matrix_T   := (
@@ -31,9 +31,9 @@ entity image_convolution is
         newPixelOut, frameEndStrobeOut : out boolean
     );
     constant CONV_ALERT_ID : AlertLogIDType := GetAlertLogID("Image convolution", ALERTLOG_BASE_ID);
-end entity image_convolution;
+end entity img_convolution;
 
-architecture RTL of image_convolution is
+architecture RTL of img_convolution is
     -- state registers
     signal pixelCounter                 : Rgb_Img_Pixel_Ptr_T := 0;
     signal currShiftWidth               : Rgb_Img_Width_T     := 0;
