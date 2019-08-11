@@ -4,6 +4,9 @@ use ieee.numeric_std.all;
 
 use work.i2c_pkg.all;
 
+library osvvm;
+context osvvm.OsvvmContext;
+
 package ccd_pkg is
     constant ARRAY_WIDTH  : natural := 2752;
     constant ARRAY_HEIGHT : natural := 2004;
@@ -72,7 +75,11 @@ package ccd_pkg is
     type Ccd_Pixel_Color_T is (Red, Green1, Green2, Blue);
 
     type Ccd_Pixel_Array_T is protected
+        procedure initRandom;
+        procedure randomFill(height : in Ccd_Active_Height_Ptr_T; width : in Ccd_Active_Width_Ptr_T);
+
         procedure setPixel(currHeight : in Ccd_Active_Height_Ptr_T; currWidth : in Ccd_Active_Width_Ptr_T; value : in Ccd_Pixel_Data_T);
+
         impure function getPixel(currHeight : Ccd_Active_Height_Ptr_T; currWidth : Ccd_Active_Width_Ptr_T) return Ccd_Pixel_Data_T;
     end protected Ccd_Pixel_Array_T;
 
@@ -84,6 +91,21 @@ package body ccd_pkg is
         type Ccd_Pixel_Matrix_T is array (Ccd_Active_Height_Ptr_T, Ccd_Active_Width_Ptr_T) of Ccd_Pixel_Data_T;
 
         variable pixelMatrix : Ccd_Pixel_Matrix_T;
+        variable randomGen   : RandomPType;
+
+        procedure initRandom is
+        begin
+            randomGen.InitSeed("flasdjfo3485912794(&#($!@&*($%");
+        end procedure initRandom;
+
+        procedure randomFill(height : in Ccd_Active_Height_Ptr_T; width : in Ccd_Active_Width_Ptr_T) is
+        begin
+            for y in 0 to height - 1 loop
+                for x in 0 to width - 1 loop
+                    pixelMatrix(y, x) := randomGen.RandSlv(Ccd_Pixel_Data_T'length);
+                end loop;
+            end loop;
+        end procedure randomFill;
 
         procedure setPixel(currHeight : in Ccd_Active_Height_Ptr_T; currWidth : in Ccd_Active_Width_Ptr_T; value : in Ccd_Pixel_Data_T) is
         begin

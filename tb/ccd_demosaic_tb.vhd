@@ -109,7 +109,7 @@ begin
             -- output
             pixelOut         => pixelOut,
             newPixelOut      => newPixelOut,
-            frameEndOut      => frameEndOut
+            frameEndStrobeOut      => frameEndOut
         );
 
     -- Clock generation

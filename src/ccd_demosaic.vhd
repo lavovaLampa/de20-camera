@@ -18,7 +18,7 @@ entity ccd_demosaic is
         pixelCounterIn                 : in  Ccd_Img_Pixel_Ptr_T;
         -- data out
         pixelOut                       : out Pixel_Aggregate_T;
-        newPixelOut, frameEndOut       : out boolean
+        newPixelOut, frameEndStrobeOut : out boolean
     );
 end entity ccd_demosaic;
 
@@ -151,16 +151,16 @@ begin
             variable pipelineAcc : Pipeline_Pixel := B"0000_0000_00";
         begin
             if rstAsyncIn = '1' then
-                pixelOut(Red)   <= X"00";
-                pixelOut(Green) <= X"00";
-                pixelOut(Blue)  <= X"00";
-                newPixelOut     <= false;
-                frameEndOut     <= false;
+                pixelOut(Red)     <= X"00";
+                pixelOut(Green)   <= X"00";
+                pixelOut(Blue)    <= X"00";
+                newPixelOut       <= false;
+                frameEndStrobeOut <= false;
             elsif rising_edge(clkIn) then
-                newPixelOut <= pipelineReady;
-                frameEndOut <= stageFrameEnd;
+                newPixelOut       <= pipelineReady;
+                frameEndStrobeOut <= stageFrameEnd;
 
-                assert (newPixelOut xor frameEndOut) or (not newPixelOut and not frameEndOut);
+                assert (newPixelOut xor frameEndStrobeOut) or (not newPixelOut and not frameEndStrobeOut);
 
                 if pipelineReady then
                     case stageColor is

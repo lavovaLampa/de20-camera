@@ -109,6 +109,8 @@ begin
             currHeight   := 0;
             currOptions  := paramsReg;
 
+            pixelArray.randomFill(currOptions.rowSize, currOptions.colSize);
+
             frameDoneOut <= false;
             hBlank       <= true;
             vBlank       <= true;
@@ -143,6 +145,8 @@ begin
 
                     currOptions  := paramsReg;
                     frameDoneOut <= true;
+
+                    pixelArray.randomFill(currOptions.rowSize, currOptions.colSize);
 
                     assert get_ccd_pixel_color(currOptions.rowStart, currOptions.colStart, currOptions.rowMirror and currOptions.colMirror) = Green1
                     report "First pixel is not correctly aligned to whole Bayer pixel!"
@@ -291,7 +295,7 @@ begin
                 CHECK_DATA => false
             )
             port map(
-                tbClkIn          => clkIn,
+                tbClkIn            => clkIn,
                 sClkIn             => sClkIn,
                 rstAsyncIn         => rstAsyncIn,
                 dataReceivedOut    => newDataArrived,
