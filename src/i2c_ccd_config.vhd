@@ -96,8 +96,8 @@ begin
             dataIn         => ctrlData,
             devAddrIn      => devAddr,
             dataAddrIn     => dataAddr,
-            doneOut        => ctrlDone,
-            errorOut       => ctrlError,
+            doneStrobeOut        => ctrlDone,
+            errorStrobeOut       => ctrlError,
             sClkOut        => sClkOut,
             sDataIO        => sDataIO
         );

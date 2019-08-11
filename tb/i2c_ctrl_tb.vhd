@@ -6,6 +6,7 @@ use work.i2c_ctrl;
 entity i2c_ctrl_tb is
     constant I2C_PERIOD : time := 10 us;
     -- clock has to be 4 times i2c clock
+    -- TODO: parametrize?
     constant CLK_PERIOD : time := 4 * I2C_PERIOD;
 
     constant TEST_DATA      : I2c_Data_T := X"5555";
@@ -14,82 +15,92 @@ entity i2c_ctrl_tb is
 end i2c_ctrl_tb;
 
 architecture tb of i2c_ctrl_tb is
+    -- clock & reset
+    signal clkIn, rstAsyncIn : std_logic := '0';
 
-    signal clkIn, rstAsyncIn : std_logic  := '0';
-    signal enableIn          : boolean    := false;
-    signal dataIn            : I2c_Data_T := X"0000";
-    signal devAddrIn         : I2c_Addr_T := X"00";
-    signal dataAddrIn        : I2c_Addr_T := X"00";
-    signal doneOut, errorOut : boolean;
-    signal sClkOut           : std_logic;
-    signal sDataIO           : std_logic  := 'Z';
+    -- i2c ctrl signals
+    signal ctrlEnableStrobeIn                    : boolean    := false;
+    signal ctrlDataIn                            : I2c_Data_T := X"0000";
+    signal ctrlDevAddrIn                         : I2c_Addr_T := X"00";
+    signal ctrlDataAddrIn                        : I2c_Addr_T := X"00";
+    signal ctrlDoneStrobeOut, ctrlErrorStrobeOut : boolean;
 
-    signal slaveDataReceived         : boolean;
-    signal recvDevAddr, recvDataAddr : I2c_Addr_T;
-    signal recvData                  : I2c_Data_T;
+    -- i2c i/o signals
+    signal sClkOut : std_logic;
+    signal sDataIO : std_logic := 'Z';
 
+    -- i2c slave model signals
+    signal slaveDataReceivedOut                              : boolean;
+    signal slaveReceivedDevAddrOut, slaveReceivedDataAddrOut : I2c_Addr_T;
+    signal slaveReceivedDataOut                              : I2c_Data_T;
+
+    -- testbench signals
     signal tbClock    : std_logic := '0';
     signal tbSimEnded : std_logic := '0';
-
 begin
-
     dut : entity work.i2c_ctrl
-        port map(clkIn          => clkIn,
-                 rstAsyncIn     => rstAsyncIn,
-                 enableInStrobe => enableIn,
-                 dataIn         => dataIn,
-                 devAddrIn      => devAddrIn,
-                 dataAddrIn     => dataAddrIn,
-                 doneOut        => doneOut,
-                 errorOut       => errorOut,
-                 sClkOut        => sClkOut,
-                 sDataIO        => sDataIO);
+        port map(
+            clkIn          => clkIn,
+            rstAsyncIn     => rstAsyncIn,
+            -- input
+            enableInStrobe => ctrlEnableStrobeIn,
+            dataIn         => ctrlDataIn,
+            devAddrIn      => ctrlDevAddrIn,
+            dataAddrIn     => ctrlDataAddrIn,
+            -- output
+            doneStrobeOut  => ctrlDoneStrobeOut,
+            errorStrobeOut => ctrlErrorStrobeOut,
+            -- i2c i/o
+            sClkOut        => sClkOut,
+            sDataIO        => sDataIO
+        );
 
     i2cSlave : entity work.i2c_slave_model
         generic map(
             CHECK_DATA => true
         )
         port map(
-            tbClkIn          => clkIn,
-            sClkIn             => sClkOut,
+            tbClkIn            => clkIn,
             rstAsyncIn         => rstAsyncIn,
-            newDataReceivedOut    => slaveDataReceived,
+            -- i2c i/o
+            sClkIn             => sClkOut,
             sDataIO            => sDataIO,
+            -- dbg output
+            newDataReceivedOut => slaveDataReceivedOut,
             expectedDataIn     => TEST_DATA,
             expectedDataAddrIn => TEST_DATA_ADDR,
             expectedDevAddrIn  => TEST_DEV_ADDR,
-            recvDevAddrOut     => recvDevAddr,
-            recvDataAddrOut    => recvDataAddr,
-            recvDataOut        => recvData
+            recvDevAddrOut     => slaveReceivedDevAddrOut,
+            recvDataAddrOut    => slaveReceivedDataAddrOut,
+            recvDataOut        => slaveReceivedDataOut
         );
 
-    -- Clock generation
+    -- clock generation
     tbClock <= not tbClock after CLK_PERIOD / 2 when tbSimEnded /= '1' else '0';
     clkIn   <= tbClock;
 
     stimuli : process
     begin
-        enableIn   <= false;
-        dataIn     <= X"0000";
-        devAddrIn  <= X"00";
-        dataAddrIn <= X"00";
+        ctrlEnableStrobeIn <= false;
+        ctrlDataIn         <= X"0000";
+        ctrlDevAddrIn      <= X"00";
+        ctrlDataAddrIn     <= X"00";
 
-        -- Reset generation
-        -- EDIT: Check that rstAsyncIn is really your reset signal
+        -- reset generation
         rstAsyncIn <= '1';
         wait for 2 * CLK_PERIOD;
         rstAsyncIn <= '0';
         wait for 2 * CLK_PERIOD;
 
-        devAddrIn  <= TEST_DEV_ADDR;
-        dataAddrIn <= TEST_DATA_ADDR;
-        dataIn     <= TEST_DATA;
-        enableIn   <= true;
+        ctrlDevAddrIn      <= TEST_DEV_ADDR;
+        ctrlDataAddrIn     <= TEST_DATA_ADDR;
+        ctrlDataIn         <= TEST_DATA;
+        ctrlEnableStrobeIn <= true;
         wait until rising_edge(clkIn);
-        enableIn   <= false;
+        ctrlEnableStrobeIn <= false;
 
-        wait until doneOut = true;
-        assert not errorOut;
+        wait until ctrlDoneStrobeOut = true;
+        assert not ctrlErrorStrobeOut;
         -- wait for stop bit
         wait for 10 * CLK_PERIOD;
         -- Stop the clock and hence terminate the simulation
@@ -101,13 +112,14 @@ begin
     begin
         if rstAsyncIn = '1' then
         elsif rising_edge(clkIn) then
-            if slaveDataReceived then
+            if slaveDataReceivedOut then
                 report "Data received";
             end if;
         end if;
     end process checkProc;
 
     -- SDA cannot get to high state
-    assert sDataIO = 'Z' or sDataIO = '0';
+    --    assert sDataIO = 'Z' or sDataIO = '0';
+    assert sDataIo /= '1';
 
 end tb;
