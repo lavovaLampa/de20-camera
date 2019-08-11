@@ -6,11 +6,11 @@ use work.i2c_pkg.all;
 use work.ccd_pkg.all;
 
 package ccd_config_pkg is
-    type ROM_Data is record
+    type ROM_Data_T is record
         addr : I2c_Addr_T;
         data : I2c_Data_T;
-    end record ROM_Data;
-    type Configuration_Array_T is array (natural range <>) of ROM_Data;
+    end record ROM_Data_T;
+    type Configuration_Array_T is array (natural range <>) of ROM_Data_T;
     type Switch_T is array (boolean) of I2c_Data_T;
 
     constant MIRROR_SWITCH       : Switch_T := (true => X"C040", false => X"0040");
@@ -19,7 +19,7 @@ package ccd_config_pkg is
     pure function valToConfig(val : natural) return I2c_Data_T;
 
     -- data to send to ccd chip in format (reg_addr, reg_data) [8b, 16b]
-    constant CCD_CONFIG : Configuration_Array_T := (
+    constant CCD_CONFIG_ARRAY : Configuration_Array_T := (
         -- row start (Y coordinate of upper left FOV corner)
         (X"01", valToConfig(CCD_CONFIGURATION.height_start)),
         -- column start (X coordinate of upper left FOV corner)
@@ -63,14 +63,13 @@ package ccd_config_pkg is
         (X"A4", X"0000")
     );
 
+    subtype Config_Ptr_T is natural range CCD_CONFIG_ARRAY'range;
 end package ccd_config_pkg;
 
 package body ccd_config_pkg is
-
     pure function valToConfig(val : natural)
     return I2c_Data_T is
     begin
         return std_logic_vector(to_unsigned(val, I2c_Data_T'length));
     end function valToConfig;
-
 end package body ccd_config_pkg;

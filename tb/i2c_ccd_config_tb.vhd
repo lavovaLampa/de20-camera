@@ -2,44 +2,51 @@ library ieee;
 use ieee.std_logic_1164.all;
 
 use work.i2c_pkg.all;
---use work.ccd_pkg.all;
 use work.ccd_config_pkg.all;
 
+library osvvm;
+context osvvm.OsvvmContext;
+
 entity i2c_ccd_config_tb is
-    constant VERBOSE    : boolean := false;
-    constant CLK_PERIOD : time    := 20 ns; -- 50MHz clock
+    constant CLK_PERIOD : time := 20 ns; -- 50MHz clock
+
+    constant I2C_CONFIG_ALERT_ID : AlertLogIDType := GetAlertLogID("i2c config ctrl testbench", ALERTLOG_BASE_ID);
 end i2c_ccd_config_tb;
 
 architecture tb of i2c_ccd_config_tb is
-    signal clkIn, rstAsyncIn : std_logic;
-    signal enableIn          : boolean;
-    signal doneOut           : boolean;
+    -- clk & reset
+    signal clkIn, rstAsyncIn : std_logic := '0';
 
-    signal expectedData                      : I2c_Data_T;
-    signal expectedDataAddr, expectedDevAddr : I2c_Addr_T;
+    -- i2c config ctrl signals
+    signal configEnableIn      : boolean := false;
+    signal configDoneStrobeOut : boolean;
 
-    signal slaveDataReceived         : boolean;
-    signal dataOutCount              : natural := 0;
-    signal recvData                  : I2c_Data_T;
-    signal recvDevAddr, recvDataAddr : I2c_Addr_T;
+    -- i2c model debug signals
+    signal modelNewDataReceivedDbg                           : boolean;
+    signal modelExpectedDataIn                               : I2c_Data_T;
+    signal modelExpectedDataAddrIn, modelExpectedDevAddrIn   : I2c_Addr_T;
+    signal modelReceivedDataAddrOut, modelReceivedDevAddrOut : I2c_Addr_T;
+    signal modelReceivedDataOut                              : I2c_Data_T;
 
-    -- i2c signals
+    -- i2c i/o
     signal sClkOut : std_logic;
     signal sDataIO : std_logic;
 
-    -- TB signals
+    -- testbench signals
     signal tbClk      : std_logic := '0';
     signal tbSimEnded : std_logic := '0';
 begin
 
     dut : entity work.i2c_ccd_config
         port map(
-            clkIn      => clkIn,
-            rstAsyncIn => rstAsyncIn,
-            enableIn   => enableIn,
-            doneOut    => doneOut,
-            sClkOut    => sClkOut,
-            sDataIO    => sDataIO
+            clkIn               => clkIn,
+            rstAsyncIn          => rstAsyncIn,
+            -- state out
+            enableStrobeIn      => configEnableIn,
+            configDoneStrobeOut => configDoneStrobeOut,
+            -- i2c i/o
+            sClkOut             => sClkOut,
+            sDataIO             => sDataIO
         );
 
     i2cSlave : entity work.i2c_slave_model
@@ -47,28 +54,30 @@ begin
             CHECK_DATA => true
         )
         port map(
-            tbClkIn          => clkIn,
-            sClkIn             => sClkOut,
+            tbClkIn            => clkIn,
             rstAsyncIn         => rstAsyncIn,
-            dataReceivedOut    => slaveDataReceived,
+            -- i2c i/o
+            sClkIn             => sClkOut,
             sDataIO            => sDataIO,
-            expectedDataIn     => expectedData,
-            expectedDataAddrIn => expectedDataAddr,
-            expectedDevAddrIn  => expectedDevAddr,
-            recvDevAddrOut     => recvDevAddr,
-            recvDataAddrOut    => recvDataAddr,
-            recvDataOut        => recvData
+            -- debug signals
+            newDataReceivedOut => modelNewDataReceivedDbg,
+            expectedDataIn     => modelExpectedDataIn,
+            expectedDataAddrIn => modelExpectedDataAddrIn,
+            expectedDevAddrIn  => modelExpectedDevAddrIn,
+            recvDevAddrOut     => modelReceivedDevAddrOut,
+            recvDataAddrOut    => modelReceivedDataAddrOut,
+            recvDataOut        => modelReceivedDataOut
         );
 
     -- Clock generation
     tbClk <= not tbClk after CLK_PERIOD / 2 when tbSimEnded /= '1' else '0';
     clkIn <= tbClk;
 
-    expectedDevAddr <= CCD_WRITE_ADDR;
+    modelExpectedDevAddrIn <= CCD_WRITE_ADDR;
 
     stimuli : process
     begin
-        enableIn <= false;
+        configEnableIn <= false;
 
         -- Reset generation
         rstAsyncIn <= '1';
@@ -76,14 +85,12 @@ begin
         rstAsyncIn <= '0';
         wait for 5 * CLK_PERIOD;
 
-        enableIn <= true;
+        configEnableIn <= true;
+        wait until rising_edge(clkIn);
+        configEnableIn <= false;
 
-        wait until doneOut;
+        wait until configDoneStrobeOut;
         wait for 5 * CLK_PERIOD;
-        assert dataOutCount = CCD_CONFIG'length
-        report "Didn't send all configuration data or sent more" & LF &
-        "Expected: " & natural'image(CCD_CONFIG'length) & LF &
-        "Sent: " & natural'image(dataOutCount);
 
         -- Stop the clock and hence terminate the simulation
         tbSimEnded <= '1';
@@ -91,25 +98,25 @@ begin
     end process;
 
     checkProc : process(clkIn, rstAsyncIn)
-        variable configPtr : natural := 0;
+        -- state regs
+        variable dataCounter : natural := 0;
     begin
         if rstAsyncIn = '1' then
-            configPtr := 0;
+            dataCounter := 0;
         elsif rising_edge(clkIn) then
-            expectedData     <= CCD_CONFIG(configPtr).data;
-            expectedDataAddr <= CCD_CONFIG(configPtr).addr;
-            if slaveDataReceived then
-                if VERBOSE then
-                    report "Config array pointer: " & to_string(configPtr);
-                    report "Received device address: 0x" & to_hstring(std_logic_vector(recvDevAddr));
-                    report "Received data address: 0x" & to_hstring(std_logic_vector(recvDataAddr));
-                    report "Received data: 0x" & to_hstring(recvData);
-                end if;
+            if dataCounter < CCD_CONFIG_ARRAY'length then
+                modelExpectedDataIn     <= CCD_CONFIG_ARRAY(dataCounter).data;
+                modelExpectedDataAddrIn <= CCD_CONFIG_ARRAY(dataCounter).addr;
+            end if;
 
-                dataOutCount <= dataOutCount + 1;
-                if configPtr < CCD_CONFIG'length - 1 then
-                    configPtr := configPtr + 1;
-                end if;
+            if modelNewDataReceivedDbg then
+                Log(I2C_CONFIG_ALERT_ID,
+                    "Config array pointer: " & to_string(dataCounter) & LF & "Received device address: 0x" & to_hstring(std_logic_vector(modelReceivedDevAddrOut)) & LF & "Received data address: 0x" & to_hstring(std_logic_vector(modelReceivedDataAddrOut)) & LF & "Received data: 0x" & to_hstring(modelReceivedDataOut), DEBUG);
+
+                dataCounter := dataCounter + 1;
+            elsif configDoneStrobeOut then
+                AlertIfNot(I2C_CONFIG_ALERT_ID, dataCounter = CCD_CONFIG_ARRAY'length,
+                           "Incorrect number of configuration entries received" & LF & "Expected: " & to_string(CCD_CONFIG_ARRAY'length) & LF & "Received: " & to_string(dataCounter));
             end if;
         end if;
     end process checkProc;

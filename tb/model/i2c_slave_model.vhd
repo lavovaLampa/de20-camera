@@ -16,7 +16,7 @@ entity i2c_slave_model is
         rstAsyncIn                            : in    std_logic;
         -- i2c i/o
         sClkIn                                : in    std_logic;
-        dataReceivedOut                       : out   boolean   := false;
+        newDataReceivedOut                    : out   boolean   := false;
         sDataIO                               : inout std_logic := 'Z';
         -- test signals
         recvDevAddrOut, recvDataAddrOut       : out   I2c_Addr_T;
@@ -44,12 +44,12 @@ begin
         variable lastVal : boolean := false;
     begin
         if rstAsyncIn = '1' then
-            dataReceivedOut <= false;
-            lastVal         := false;
+            newDataReceivedOut <= false;
+            lastVal            := false;
         elsif rising_edge(tbClkIn) then
             -- value changed
-            dataReceivedOut <= batchOK and not lastVal;
-            lastVal         := batchOK;
+            newDataReceivedOut <= batchOK and not lastVal;
+            lastVal            := batchOK;
         end if;
     end process reportProc;
 

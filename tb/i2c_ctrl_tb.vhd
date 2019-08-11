@@ -53,7 +53,7 @@ begin
             tbClkIn          => clkIn,
             sClkIn             => sClkOut,
             rstAsyncIn         => rstAsyncIn,
-            dataReceivedOut    => slaveDataReceived,
+            newDataReceivedOut    => slaveDataReceived,
             sDataIO            => sDataIO,
             expectedDataIn     => TEST_DATA,
             expectedDataAddrIn => TEST_DATA_ADDR,

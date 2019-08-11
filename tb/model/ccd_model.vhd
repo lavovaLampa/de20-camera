@@ -298,7 +298,7 @@ begin
                 tbClkIn            => clkIn,
                 sClkIn             => sClkIn,
                 rstAsyncIn         => rstAsyncIn,
-                dataReceivedOut    => newDataArrived,
+                newDataReceivedOut    => newDataArrived,
                 sDataIO            => sDataIO,
                 recvDevAddrOut     => open,
                 recvDataAddrOut    => dataAddrIn,
