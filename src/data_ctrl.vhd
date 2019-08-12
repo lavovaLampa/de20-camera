@@ -17,33 +17,38 @@ use work.sdram_pkg.Data_T;
 use work.sdram_pkg.Col_Ptr_T;
 use work.sdram_pkg.PAGE_LEN;
 use work.sdram_pkg.Mem_IO_R;
+use work.sdram_pkg.BANK_COUNT;
 
 library PoC;
 
 entity data_ctrl is
     port(
-        ccdClkIn, vgaClkIn, memClkIn : in    std_logic;
-        rstAsyncIn                   : in    std_logic;
+        ccdClkIn, vgaClkIn, memClkIn       : in    std_logic;
+        rstAsyncIn                         : in    std_logic;
         -- write side
-        ccdPixelDataIn               : in    Pixel_Aggregate_T;
-        newPixelIn, frameEndStrobeIn : in    boolean; -- from convolution kernel
-        ccdHBlankIn, ccdVBlankIn     : in    boolean; -- from ccd ctrl
+        ccdPixelDataIn                     : in    Pixel_Aggregate_T;
+        ccdNewPixelIn, ccdFrameEndStrobeIn : in    boolean; -- from convolution kernel
+        ccdHBlankIn, ccdVBlankIn           : in    boolean; -- from ccd ctrl
         -- read side
-        vgaNextPixelIn               : in    boolean;
-        vgaPixelOut                  : out   Pixel_Aggregate_T;
+        vgaNextPixelIn                     : in    boolean;
+        vgaVBlankIn                        : in    boolean;
+        vgaPixelOut                        : out   Pixel_Aggregate_T;
         -- sdram i/o
-        memDataIo                    : inout Data_T;
-        memOut                       : out   Mem_IO_R;
-        memClkStableIn               : in    std_logic
+        memDataIo                          : inout Data_T;
+        memOut                             : out   Mem_IO_R;
+        memClkStableIn                     : in    std_logic
     );
-    constant MEM_CELLS_REQUIRED : natural := natural(ceil(real(IMG_HEIGHT * IMG_WIDTH * 3) / 2.0));
-    constant PAGES_REQUIRED     : natural := natural(ceil(real(MEM_CELLS_REQUIRED) / real(PAGE_LEN)));
-    constant ROWS_REQUIRED      : natural := natural(ceil(real(PAGES_REQUIRED) / 4.0));
+    -- 1 col = 16 b
+    constant MEM_COLS_REQUIRED  : natural := natural(ceil(real(IMG_HEIGHT * IMG_WIDTH * 3) / 2.0));
+    -- 1 page = 256 cols ~~ 170 pixels (170.666 pixels)
+    constant MEM_PAGES_REQUIRED : natural := natural(ceil(real(MEM_COLS_REQUIRED) / real(PAGE_LEN)));
+    -- 1 row = 4 pages (4 banks, each has the same row)
+    constant ROWS_REQUIRED      : natural := natural(ceil(real(MEM_PAGES_REQUIRED) / real(BANK_COUNT)));
 
-    constant MAX_ADDR      : Ctrl_Addr_T := to_unsigned(PAGES_REQUIRED, Ctrl_Addr_T'length) - 1;
-    constant COL_REMAINDER : Col_Ptr_T   := MEM_CELLS_REQUIRED mod PAGE_LEN;
+    constant MAX_ADDR      : Ctrl_Addr_T := to_unsigned(MEM_PAGES_REQUIRED, Ctrl_Addr_T'length) - 1;
+    constant COL_REMAINDER : Col_Ptr_T   := MEM_COLS_REQUIRED mod PAGE_LEN;
 
-    -- in-band flag signalizes end of the current image frame
+    -- frame end in-band flag
     constant FRAME_END_FLAG : Packed_Pixel_T := X"01_01_01";
 end entity data_ctrl;
 
@@ -67,7 +72,7 @@ architecture RTL of data_ctrl is
     signal vgaFifo : Fifo_State_R;
 begin
     -- ccd-side fifo write controller
-    ccdWriteProc : process(ccdFifo, newPixelIn, ccdPixelDataIn, frameEndStrobeIn)
+    ccdWriteProc : process(ccdFifo, ccdNewPixelIn, ccdPixelDataIn, ccdFrameEndStrobeIn)
         variable packedPixel : Packed_Pixel_T; -- helper variable
     begin
         -- pack pixel data to be suitable for fifo
@@ -76,14 +81,14 @@ begin
         -- set pixel data to be input to the write port of ccd FIFO
         if ccdFifo.writePort.data = FRAME_END_FLAG then
             ccdFifo.writePort.data <= X"02_02_02";
-        elsif frameEndStrobeIn then
+        elsif ccdFrameEndStrobeIn then
             ccdFifo.writePort.data <= FRAME_END_FLAG;
         else
             ccdFifo.writePort.data <= packedPixel;
         end if;
 
         -- control whether to advance fifo write data pointer
-        if newPixelIn or frameEndStrobeIn then
+        if ccdNewPixelIn or ccdFrameEndStrobeIn then
             assert not ccdFifo.writePort.full
             report "CCD write fifo is full"
             severity error;
@@ -94,12 +99,33 @@ begin
         end if;
     end process ccdWriteProc;
 
-    vgaReadProc : process(vgaClkIn, rstAsyncIn, vgaFifo)
+    vgaReadProc : process(vgaClkIn, rstAsyncIn, vgaFifo, vgaNextPixelIn)
+        variable initialSync : boolean := false;
     begin
-        if rstAsyncIn = '1' then
+        vgaPixelOut <= (
+            Red   => unsigned(vgaFifo.readPort.data(23 downto 16)),
+            Green => unsigned(vgaFifo.readPort.data(15 downto 8)),
+            Blue  => unsigned(vgaFifo.readPort.data(7 downto 0))
+        );
 
+        if vgaNextPixelIn and initialSync then
+            assert vgaFifo.readPort.valid
+            report "Cannot read from vga fifo, pixel not valid"
+            severity error;
+
+            vgaFifo.readPort.got <= true;
+        else
+            vgaFifo.readPort.got <= false;
+        end if;
+
+        if rstAsyncIn = '1' then
+            initialSync := false;
         elsif rising_edge(vgaClkIn) then
 
+            -- initially wait for vga vblank to synchronize reading from fifo
+            if vgaVBlankIn then
+                initialSync := true;
+            end if;
         end if;
     end process vgaReadProc;
 
@@ -123,22 +149,35 @@ begin
         constant VGA_VBLANK_CYCLES : natural := VGA_HBLANK_CYCLES * 44;
 
         -- port state registers
-        variable readPort      : Mem_Port_State_R := (addrPtr => (others => '0'), pixelPacking => RedGreen, dataHold => (others => '0'));
-        variable writePort     : Mem_Port_State_R := (addrPtr => (others => '0'), pixelPacking => RedGreen, dataHold => (others => '0'));
-        variable currBurstAddr : Ctrl_Addr_T      := (others => '0');
-        variable vgaCounter    : Col_Ptr_T        := 0;
+        variable readPort        : Mem_Port_State_R := (currAddr => (others => '0'), pixelPacking => RedGreen, dataHold => (others => '0'));
+        variable writePort       : Mem_Port_State_R := (currAddr => (others => '0'), pixelPacking => RedGreen, dataHold => (others => '0'));
+        variable currBurstAddr   : Ctrl_Addr_T      := (others => '0');
+        variable vgaCounter      : Col_Ptr_T        := 0;
+        variable vgaFrameEndSent : boolean          := true;
+        variable tmpFlag         : boolean          := false;
     begin
+        tmpFlag := false;
+
         -- mem access scheduling/arbitration
         if cmdReady then
-            if (ccdFifo.readPort.fillState > B"001" and ccdHBlankIn) or (ccdVBlankIn and ccdFifo.readPort.valid) then
+            -- write if ccd is in horizontal blank and fifo has enough pixels to fill memory page
+            -- or ccd is in a vertical blank and we empty the fifo completely
+            if (ccdFifo.readPort.fillState >= B"0010" and ccdHBlankIn) or ((ccdVBlankIn and ccdHBlankIn) and ccdFifo.readPort.valid and ccdFifo.readPort.data /= FRAME_END_FLAG) then
                 currCmd  <= Write;
-                currAddr <= writePort.addrPtr;
-            elsif vgaFifo.writePort.emptyState < 010 then
-                currCmd  <= Read;
-                currAddr <= readPort.addrPtr;
-            elsif ccdVBlankIn then
+                currAddr <= writePort.currAddr;
+
+            -- if ccdh is in a verical and horizontal blank, we refresh the memory
+            elsif ccdHBlankIn and ccdVBlankIn then
                 currCmd  <= Refresh;
                 currAddr <= (others => '-');
+
+            -- otherwise, if vga fifo has enough space for one mem page of pixels,
+            -- we start read burst
+            elsif vgaFifo.writePort.emptyState >= B"0010" and vgaFrameEndSent then
+                currCmd  <= Read;
+                currAddr <= readPort.currAddr;
+
+            -- do nothing
             else
                 currCmd  <= NoOp;
                 currAddr <= (others => '-');
@@ -174,6 +213,14 @@ begin
                 memWrite             <= (others => '0');
                 ccdFifo.readPort.got <= false;
             end if;
+
+        -- if last pixel in the ccd fifo is frame end flag, we flush it so as not
+        -- to desynchronize
+        elsif ccdFifo.readPort.valid and ccdFifo.readPort.data = FRAME_END_FLAG then
+            memWrite             <= (others => '-');
+            ccdFifo.readPort.got <= true;
+
+        -- else do nothing (do not advance fifo read ptr)
         else
             ccdFifo.readPort.got <= false;
             memWrite             <= (others => '-');
@@ -202,17 +249,38 @@ begin
                 vgaFifo.writePort.put  <= false;
                 vgaFifo.writePort.data <= (others => '-');
             end if;
+        elsif not vgaFrameEndSent then
+            vgaFifo.writePort.put  <= true;
+            vgaFifo.writePort.data <= FRAME_END_FLAG;
+            tmpFlag                := true;
         else
             vgaFifo.writePort.put  <= false;
             vgafifo.writePort.data <= (others => '-');
         end if;
 
         if rstAsyncIn = '1' then
-            readPort      := (addrPtr => (others => '0'), pixelPacking => RedGreen, dataHold => (others => '0'));
-            writePort     := (addrPtr => (others => '0'), pixelPacking => RedGreen, dataHold => (others => '0'));
+            readPort      := (currAddr => (others => '0'), pixelPacking => RedGreen, dataHold => (others => '0'));
+            writePort     := (currAddr => (others => '0'), pixelPacking => RedGreen, dataHold => (others => '0'));
             currBurstAddr := (others => '0');
-            vgaCounter    := 0;
+
+            vgaCounter      := 0;
+            vgaFrameEndSent := true;
         elsif rising_edge(memClkIn) then
+            -- advance address if used
+            if cmdReady then
+                if (ccdFifo.readPort.fillState > B"0010" and ccdHBlankIn) or ((ccdVBlankIn and ccdHBlankIn) and ccdFifo.readPort.valid and ccdFifo.readPort.data /= FRAME_END_FLAG) then
+                    currBurstAddr      := writePort.currAddr;
+                    writePort.currAddr := writePort.currAddr + 1;
+                elsif vgaFifo.writePort.emptyState >= B"0010" then
+                    currBurstAddr := readPort.currAddr;
+
+                    if currBurstAddr = MAX_ADDR then
+                        vgaFrameEndSent := false;
+                    end if;
+
+                    readPort.currAddr := next_addr(readPort.currAddr);
+                end if;
+            end if;
 
             -- ccd fifo read/mem write side
             if dataNextRequired then
@@ -223,6 +291,9 @@ begin
                 end case;
 
                 writePort.pixelPacking := next_packing(writePort.pixelPacking);
+            elsif ccdFifo.readPort.valid and ccdFifo.readPort.data = FRAME_END_FLAG then
+                writePort.pixelPacking := RedGreen;
+                writePort.currAddr     := (others => '0');
             end if;
 
             -- mem read/vga fifo write side
@@ -234,6 +305,7 @@ begin
                 end case;
 
                 readPort.pixelPacking := next_packing(readPort.pixelPacking);
+
                 if vgaCounter >= PAGE_LEN - 1 then
                     vgaCounter := 0;
                 else
@@ -241,19 +313,8 @@ begin
                 end if;
             end if;
 
-            if cmdReady then
-                if (ccdFifo.readPort.fillState > B"001" and ccdHBlankIn) or (ccdVBlankIn and ccdFifo.readPort.valid) then
-                    -- if frameEndFlag on ccdFifo output, then reset addr ptr
-                    if ccdFifo.readPort.data = FRAME_END_FLAG then
-                        writePort.addrPtr      := (others => '0');
-                        writePort.pixelPacking := RedGreen;
-                    else
-                        writePort.addrPtr := writePort.addrPtr + 1;
-                    end if;
-                elsif vgaFifo.writePort.emptyState < 111 then
-                    currBurstAddr    := readPort.addrPtr;
-                    readPort.addrPtr := next_addr(readPort.addrPtr);
-                end if;
+            if tmpFlag then
+                vgaFrameEndSent := true;
             end if;
         end if;
     end process memProc;
@@ -261,7 +322,7 @@ begin
     ccdFifoEntity : entity PoC.fifo_ic_got
         generic map(
             DATA_WIDTH     => 24,
-            MIN_DEPTH      => 1280,
+            MIN_DEPTH      => 1280,     -- gets rounded to 2048 = 2^11
             DATA_REG       => true,
             OUTPUT_REG     => false,
             ESTATE_WR_BITS => STATE_BITS,
@@ -289,7 +350,7 @@ begin
     vgaFifoEntity : entity PoC.fifo_ic_got
         generic map(
             DATA_WIDTH     => 24,
-            MIN_DEPTH      => 1280,
+            MIN_DEPTH      => 1280,     --gets rounded to 2048 = 2^11
             DATA_REG       => true,
             OUTPUT_REG     => false,
             ESTATE_WR_BITS => STATE_BITS,
@@ -317,7 +378,7 @@ begin
     sdramCtrl : entity work.sdram_ctrl_top
         generic map(
             -- FIXME: write in correct values
-            PAGES_REQUIRED  => PAGES_REQUIRED,
+            PAGES_REQUIRED  => MEM_PAGES_REQUIRED,
             READ_BURST_LEN  => 4,
             WRITE_BURST_LEN => 4
         )

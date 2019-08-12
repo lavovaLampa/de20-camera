@@ -83,7 +83,7 @@ entity fifo_ic_got is
         FSTATE_RD_BITS : natural := 0   -- Full State Bits
     );
     port(
-        -- Write Interface
+        -- Write interface
         clkWriteIn, rstWriteIn : in  std_logic; -- synchronous reset
         put                    : in  boolean; -- whether to advance write pointer
         dataIn                 : in  std_logic_vector(DATA_WIDTH - 1 downto 0);

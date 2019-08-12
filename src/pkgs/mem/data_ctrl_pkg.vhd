@@ -6,7 +6,7 @@ use work.sdram_ctrl_pkg.Ctrl_Addr_T;
 use work.sdram_pkg.Data_T;
 
 package data_ctrl_pkg is
-    constant STATE_BITS : natural := 3;
+    constant STATE_BITS : natural := 4;
 
     subtype Packed_Pixel_T is std_logic_vector(23 downto 0);
 
@@ -42,7 +42,7 @@ package data_ctrl_pkg is
 
     type Mem_Port_T is (Read, Write);
     type Mem_Port_State_R is record
-        addrPtr      : Ctrl_Addr_T;
+        currAddr     : Ctrl_Addr_T;
         pixelPacking : Pixel_Pack_T;
         dataHold     : Data_T;
     end record Mem_Port_State_R;

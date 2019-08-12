@@ -3,10 +3,13 @@ use ieee.std_logic_1164.all;
 
 use work.img_pkg.Pixel_Aggregate_T;
 use work.img_pkg.Pixel_Data_T;
+use work.img_pkg.Pixel_Color_T;
 
 use work.sdram_pkg.all;
 
 use work.ccd_pkg.all;
+
+use work.vga_pkg.all;
 
 library osvvm;
 context osvvm.OsvvmContext;
@@ -16,30 +19,29 @@ entity data_ctrl_tb is
     constant MEM_CLK_PERIOD : time := 10 ns;
     constant VGA_CLK_PERIOD : time := 40 ns;
 
-    constant TEST_CCD_HEIGHT : natural := 10;
-    constant TEST_CCD_WIDTH  : natural := 10;
+    constant TEST_CCD_HEIGHT        : natural := 480;
+    constant TEST_CCD_WIDTH         : natural := 640;
+    constant TEST_CCD_HBLANK_CYCLES : natural := 1024;
+    constant TEST_CCD_VBLANK_CYCLES : natural := 131;
 
-    constant TEST_VGA_HEIGHT : natural := 480;
-    constant TEST_VGA_WIDTH  : natural := 640;
+    constant TEST_FRAME_COUNT : natural := 3;
 
     constant DATA_CTRL_TB_ALERT_ID : AlertLogIDType := GetAlertLogID("Data ctrl testbench", ALERTLOG_BASE_ID);
 end data_ctrl_tb;
 
 architecture tb of data_ctrl_tb is
     -- clock & reset signals
-    signal ccdClk, vgaClk, memClk, pixClk : std_logic := '0';
-    signal rstAsync                       : std_logic;
+    signal ccdClk, vgaClk, memClk : std_logic := '0';
+    signal rstAsync, dataRstAsync : std_logic;
 
     -- ccd-side signals
-    signal imgPixelDataOut      : Pixel_Aggregate_T;
-    signal imgNewPixelOut       : boolean;
-    signal imgFrameEndStrobeOut : boolean;
-    signal ccdHBlankIn          : boolean;
-    signal ccdVBlankIn          : boolean;
+    signal ccdPixelDataOut                      : Pixel_Aggregate_T;
+    signal ccdNewPixelOut, ccdFrameEndStrobeOut : boolean;
+    signal ccdHBlankOut, ccdVBlankOut           : boolean;
 
     -- vga-side signals
-    signal vgaNextPixelIn : boolean;
-    signal vgaPixelOut    : Pixel_Aggregate_T;
+    signal vgaNextPixelOut, vgaVBlankOut : boolean;
+    signal vgaPixelIn                    : Pixel_Aggregate_T;
 
     -- mem signals
     signal memDataIo                   : Data_T;
@@ -50,142 +52,48 @@ architecture tb of data_ctrl_tb is
     -- testbench signals
     signal tbSimEnded : std_logic := '0';
 begin
-        sdramModel : entity work.sdram_model
-            generic map(
-                LOAD_FROM_FILE => false,
-                DUMP_TO_FILE   => false
-            )
-            port map(
-                clkIn              => memClk,
-                addrIn             => memOut.addr,
-                dataIo             => memDataIo,
-                bankSelectIn       => memOut.bankSelect,
-                clkEnableIn        => memOut.clkEnable,
-                chipSelectNegIn    => memOut.cmdAggregate.chipSelectNeg,
-                rowAddrStrobeNegIn => memOut.cmdAggregate.rowAddrStrobeNeg,
-                colAddrStrobeNegIn => memOut.cmdAggregate.colAddrStrobeNeg,
-                writeEnableNegIn   => memOut.cmdAggregate.writeEnableNeg,
-                dqmIn              => memOut.dqm,
-                -- debug signals
-                isInitializedOut   => memInitialized,
-                simEndedIn         => memSimEnded
-            );
-    
     dut : entity work.data_ctrl
         port map(
             ccdClkIn         => ccdClk,
             vgaClkIn         => vgaClk,
             memClkIn         => memClk,
-            rstAsyncIn       => rstAsync,
+            rstAsyncIn       => dataRstAsync,
             -- ccd i/o
-            ccdPixelDataIn   => imgPixelDataOut,
-            newPixelIn       => imgNewPixelOut,
-            frameEndStrobeIn => imgFrameEndStrobeOut,
-            ccdHBlankIn      => ccdHBlankIn,
-            ccdVBlankIn      => ccdVBlankIn,
+            ccdPixelDataIn   => ccdPixelDataOut,
+            ccdNewPixelIn       => ccdNewPixelOut,
+            ccdFrameEndStrobeIn => ccdFrameEndStrobeOut,
+            ccdHBlankIn      => ccdHBlankOut,
+            ccdVBlankIn      => ccdVBlankOut,
             -- vga i/o
-            vgaNextPixelIn   => vgaNextPixelIn,
-            vgaPixelOut      => vgaPixelOut,
+            vgaNextPixelIn   => vgaNextPixelOut,
+            vgaVBlankIn      => vgaVBlankOut,
+            vgaPixelOut      => vgaPixelIn,
             -- mem i/o
             memDataIo        => memDataIo,
             memOut           => memOut,
             memClkStableIn   => memClkStable
         );
 
---    ccdBlock : block
---        signal ccdPixelValidOut, demosaicNewPixelOut : boolean;
---        signal ccdFrameEndOut, demosaicFrameEndOut   : boolean;
---        signal demosaicPixelDataOut                  : Pixel_Aggregate_T;
---        signal ccdPixelDataOut                       : Pixel_Data_T;
---        signal ccdPixelCounterOut                    : Ccd_Img_Pixel_Ptr_T;
---    begin
---        imgConvolution : entity work.img_convolution
---                --            generic map(
---                --                CONVOLUTION_KERNEL => CONVOLUTION_KERNEL,
---                --                PRESCALE_AMOUNT    => PRESCALE_AMOUNT
---                --            )
---            port map(
---                clkIn             => ccdClk,
---                rstAsyncIn        => rstAsync,
---                -- img input
---                pixelDataIn       => demosaicPixelDataOut,
---                newPixelIn        => demosaicNewPixelOut,
---                frameEndStrobeIn  => demosaicFrameEndOut,
---                -- img output
---                pixelDataOut      => imgPixelDataOut,
---                newPixelOut       => imgNewPixelOut,
---                frameEndStrobeOut => imgFrameEndStrobeOut
---            );
---
---        ccdDemosaic : entity work.ccd_demosaic
---            port map(
---                clkIn            => pixClk,
---                rstAsyncIn       => rstAsync,
---                -- pixel in
---                pixelIn          => ccdPixelDataOut,
---                pixelValidIn     => ccdPixelValidOut,
---                frameEndStrobeIn => ccdFrameEndOut,
---                pixelCounterIn   => ccdPixelCounterOut,
---                -- pixel out
---                pixelOut         => demosaicPixelDataOut,
---                newPixelOut      => demosaicNewPixelOut,
---                frameEndOut      => demosaicFrameEndOut
---            );
---
---        tmpBlock : block
---            signal modelLineValid, modelFrameValid : std_logic;
---            signal modelPixelDataOut               : Ccd_Pixel_Data_T;
---
---            -- ccd model debug signals
---            signal modelFrameDoneDbg, modelConfigUpdateDbg : boolean;
---        begin
---
---            ccdCtrl : entity work.ccd_ctrl
---                port map(
---                    clkIn             => pixClk,
---                    rstAsyncIn        => rstAsync,
---                    -- ccd input
---                    frameValidIn      => modelFrameValid,
---                    lineValidIn       => modelLineValid,
---                    ccdPixelIn        => modelPixelDataOut,
---                    -- state output
---                    pixelValidOut     => ccdPixelValidOut,
---                    frameEndStrobeOut => ccdFrameEndOut,
---                    hBlankOut         => ccdHBlankIn,
---                    vBlankOut         => ccdVBlankIn,
---                    heightOut         => open,
---                    widthOut          => open,
---                    pixelCounterOut   => ccdPixelCounterOut,
---                    pixelOut          => ccdPixelDataOut
---                );
---
---            ccdModel : entity work.ccd_model
---                generic map(
---                    INIT_HEIGHT => TEST_CCD_HEIGHT,
---                    INIT_WIDTH  => TEST_CCD_WIDTH
---                    --            INIT_HEIGHT_START => INIT_HEIGHT_START,
---                    --            INIT_WIDTH_START  => INIT_WIDTH_START
---                )
---                port map(
---                    clkIn           => ccdClk,
---                    rstAsyncNegIn   => rstAsync,
---                    pixClkOut       => pixClk,
---                    -- state signals output
---                    lineValidOut    => modelLineValid,
---                    frameValidOut   => modelFrameValid,
---                    strobeOut       => open,
---                    -- pixel data out
---                    dataOut         => modelPixelDataOut,
---                    -- i2c i/o
---                    sClkIn          => '1',
---                    sDataIO         => open,
---                    -- debug signals
---                    frameDoneOut    => modelFrameDoneDbg,
---                    configUpdateOut => modelConfigUpdateDbg
---                );
---        end block tmpBlock;
---
---    end block ccdBlock;
+    sdramModel : entity work.sdram_model
+        generic map(
+            LOAD_FROM_FILE => false,
+            DUMP_TO_FILE   => false
+        )
+        port map(
+            clkIn              => memClk,
+            addrIn             => memOut.addr,
+            dataIo             => memDataIo,
+            bankSelectIn       => memOut.bankSelect,
+            clkEnableIn        => memOut.clkEnable,
+            chipSelectNegIn    => memOut.cmdAggregate.chipSelectNeg,
+            rowAddrStrobeNegIn => memOut.cmdAggregate.rowAddrStrobeNeg,
+            colAddrStrobeNegIn => memOut.cmdAggregate.colAddrStrobeNeg,
+            writeEnableNegIn   => memOut.cmdAggregate.writeEnableNeg,
+            dqmIn              => memOut.dqm,
+            -- debug signals
+            isInitializedOut   => memInitialized,
+            simEndedIn         => memSimEnded
+        );
 
     -- clock generation
     ccdClk <= not ccdClk after CCD_CLK_PERIOD / 2 when tbSimEnded /= '1' else '0';
@@ -194,32 +102,119 @@ begin
 
     stimuli : process
     begin
-        vgaNextPixelIn <= false;
-        memClkStable   <= '0';
+        SetLogEnable(DEBUG, true);
+        SetLogEnable(INFO, true);
+
+        memClkStable <= '0';
 
         -- reset generation
-        rstAsync <= '1';
+        rstAsync     <= '1';
+        dataRstAsync <= '1';
         wait for 10 * MEM_CLK_PERIOD;
+
+        dataRstAsync <= '0';
+        wait for 10 * MEM_CLK_PERIOD;
+
+        memClkStable <= '1';
+
+        wait until memInitialized;
+
         rstAsync <= '0';
         wait for 10 * MEM_CLK_PERIOD;
 
-        wait for 10 * MEM_CLK_PERIOD;
-        memClkStable <= '1';
-
-        wait for 5000 * CCD_CLK_PERIOD;
+        for i in 0 to TEST_FRAME_COUNT - 1 loop
+            wait until ccdFrameEndStrobeOut;
+        end loop;
 
         -- Stop the clock and hence terminate the simulation
         tbSimEnded <= '1';
         wait;
     end process;
 
-    --    vgaMockProc : process(vgaClk, rstAsync)
-    --    begin
-    --        if rstAsync = '1' then
-    --
-    --        elsif rising_edge(vgaClk) then
-    --
-    --        end if;
-    --    end process vgaMockProc;
+    ccdBlock : block
+        signal currHeight, currWidth : natural;
+    begin
+        inputMockProc : process(ccdClk, rstAsync)
+            variable randomGen : RandomPType;
+        begin
+            -- debug signals
+            --        currHeightDbg   <= currHeight;
+            --        currWidthDbg    <= currWidth;
+            --        pixelCounterDbg <= pixelCounter;
 
+            if rstAsync = '1' then
+                ccdFrameEndStrobeOut <= false;
+                ccdNewPixelOut       <= false;
+                ccdPixelDataOut      <= (others => (others => '0'));
+
+                currWidth  <= 0;
+                currHeight <= 0;
+
+                randomGen.InitSeed("ajfljsfowenvzoiru98423");
+            elsif rising_edge(ccdClk) then
+                ccdNewPixelOut       <= false;
+                ccdFrameEndStrobeOut <= false; -- strobe
+
+                ccdHBlankOut <= currWidth >= TEST_CCD_WIDTH;
+                ccdVBlankOut <= currHeight >= TEST_CCD_HEIGHT;
+
+                if currWidth < TEST_CCD_WIDTH and currHeight < TEST_CCD_HEIGHT then
+                    ccdPixelDataOut <= (
+                        Red   => randomGen.RandUnsigned(Pixel_Data_T'length),
+                        Green => randomGen.RandUnsigned(Pixel_Data_T'length),
+                        Blue  => randomGen.RandUnsigned(Pixel_Data_T'length)
+                    );
+                    ccdNewPixelOut  <= true;
+                else                    -- hblank or vblank
+                    ccdPixelDataOut <= (others => (others => '-'));
+                    ccdNewPixelOut  <= false;
+                end if;
+
+                if currHeight = TEST_CCD_HEIGHT and currWidth = 0 then
+                    ccdFrameEndStrobeOut <= true;
+                end if;
+
+                if currWidth >= TEST_CCD_WIDTH + TEST_CCD_HBLANK_CYCLES - 1 then
+                    currWidth <= 0;
+
+                    Log(DATA_CTRL_TB_ALERT_ID, "Current height: " & to_string(currHeight));
+
+                    if currHeight >= TEST_CCD_HEIGHT + TEST_CCD_VBLANK_CYCLES - 1 then
+                        currHeight <= 0;
+                    else
+                        currHeight <= currHeight + 1;
+                    end if;
+                else
+                    currWidth <= currWidth + 1;
+                end if;
+            end if;
+        end process inputMockProc;
+    end block ccdBlock;
+
+    vgaBlock : block
+        signal currHeight, currWidth : natural;
+    begin
+        vgaMockProc : process(vgaClk, rstAsync, currHeight, currWidth)
+        begin
+            vgaVBlankOut    <= currHeight >= IMG_HEIGHT;
+            vgaNextPixelOut <= currHeight < IMG_HEIGHT and currWidth < IMG_WIDTH;
+
+            if rstAsync = '1' then
+                currHeight <= 0;
+                currWidth  <= 0;
+            elsif rising_edge(vgaClk) then
+                if currWidth > IMG_WIDTH + HORIZONTAL_BLANK_CYCLES then
+                    currWidth <= 0;
+
+                    if currHeight > IMG_HEIGHT + VERTICAL_BLANK_CYCLES then
+                        currHeight <= 0;
+                    else
+                        currHeight <= currHeight + 1;
+                    end if;
+                else
+                    currWidth <= currWidth + 1;
+                end if;
+            end if;
+        end process vgaMockProc;
+    end block vgaBlock;
 end tb;
