@@ -15,4 +15,7 @@ package vga_pkg is
     constant FRAME_BACK_PORCH      : natural := 33;
     -- blanking sum
     constant VERTICAL_BLANK_CYCLES : natural := FRAME_FRONT_PORCH + FRAME_SYNC_PULSE + FRAME_BACK_PORCH;
+
+    subtype Vga_Width_Ptr_T is natural range 0 to IMG_WIDTH + HORIZONTAL_BLANK_CYCLES - 1;
+    subtype Vga_Height_Ptr_T is natural range 0 to IMG_HEIGHT + VERTICAL_BLANK_CYCLES - 1;
 end package vga_pkg;
