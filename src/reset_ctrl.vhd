@@ -3,41 +3,76 @@ use ieee.std_logic_1164.all;
 use ieee.numeric_std.all;
 
 entity reset_ctrl is
-    generic(
-        counterMax : natural := 10000
-    );
     port(
-        clkIn, rstAsyncIn : in  std_logic;
-        rstOut            : out std_logic := '1';
-        ccdNegRstOut      : out std_logic := '0'
+        clkIn, rstAsyncIn        : in  std_logic;
+        -- input
+        memInitialized           : in  boolean;
+        ccdConfigurationDone     : in  boolean;
+        -- reset output
+        dataCtrlResetOut         : out std_logic; -- bring up first and wait for mem
+        ccdResetOut              : out std_logic; -- bring up second and wait for power up
+        ccdConfigurationResetOut : out std_logic; -- bring up third to configure ccd
+        resetOut                 : out std_logic -- bring up everything else
     );
 end entity reset_ctrl;
 
 architecture RTL of reset_ctrl is
-    signal rstCounter : natural range 0 to counterMax := 0;
+    constant COUNTER_MAX                          : natural := 2**11;
+    signal memInitStabilizer0, memInitStabilizer1 : boolean; -- crossing clock domains, avoid metastability
 begin
     rstProc : process(clkIn, rstAsyncIn)
+        type Ctrl_State_T is (InitMem, InitCcd, WriteConfiguration, InitRest);
+
+        -- state registers
+        variable currState    : Ctrl_State_T                       := InitMem;
+        variable resetCounter : natural range 0 to COUNTER_MAX - 1 := 0;
     begin
         if rstAsyncIn = '1' then
-            ccdNegRstOut <= '0';
-            rstOut       <= '1';
-            rstCounter   <= 0;
+            currState    := InitMem;
+            resetCounter := 0;
+
+            dataCtrlResetOut         <= '1';
+            ccdResetOut              <= '1';
+            ccdConfigurationResetOut <= '1';
+            resetOut                 <= '1';
         elsif rising_edge(clkIn) then
-            if rstCounter < counterMax then
-                rstCounter <= rstCounter + 1;
-            end if;
+            memInitStabilizer0 <= memInitialized;
+            memInitStabilizer1 <= memInitStabilizer0;
 
-            -- change timing after SDRAM ctrl addition
-            -- bring up digital supplies first
-            if rstCounter > 1000 then
-                rstOut <= '0';
-            end if;
-            -- start ccd
-            if rstCounter > 1500 then
-                ccdNegRstOut <= '1';
-            end if;
+            case currState is
+                when InitMem =>
+                    if resetCounter > 1000 then
+                        dataCtrlResetOut <= '0';
+
+                        if memInitStabilizer1 then
+                            resetCounter := 0;
+                            currState    := InitCcd;
+                        end if;
+                    else
+                        resetCounter := resetCounter + 1;
+                    end if;
+
+                when InitCcd =>
+                    ccdResetOut <= '0';
+
+                    if resetCounter > 1000 then
+                        currState    := WriteConfiguration;
+                        resetCounter := 0;
+                    else
+                        resetCounter := resetCounter + 1;
+                    end if;
+
+                when WriteConfiguration =>
+                    ccdConfigurationResetOut <= '0';
+
+                    if ccdConfigurationDone then
+                        currState := InitRest;
+                    end if;
+
+                when InitRest =>
+                    resetOut <= '0';
+
+            end case;
         end if;
-
     end process rstProc;
-
 end architecture RTL;
