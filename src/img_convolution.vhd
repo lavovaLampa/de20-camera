@@ -16,7 +16,7 @@ entity img_convolution is
         -- edge detection kernel
         constant CONVOLUTION_KERNEL : Convolution_Matrix_T   := (
             (-1, -1, -1),
-            (-1, 8, -1),
+            (-1,  8, -1),
             (-1, -1, -1)
         );
         constant PRESCALE_AMOUNT    : Convolution_Prescale_T := 0

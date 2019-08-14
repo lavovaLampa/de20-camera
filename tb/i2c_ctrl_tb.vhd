@@ -43,7 +43,7 @@ begin
             clkIn          => clkIn,
             rstAsyncIn     => rstAsyncIn,
             -- input
-            enableInStrobe => ctrlEnableStrobeIn,
+            enableStrobeIn => ctrlEnableStrobeIn,
             dataIn         => ctrlDataIn,
             devAddrIn      => ctrlDevAddrIn,
             dataAddrIn     => ctrlDataAddrIn,
@@ -52,7 +52,7 @@ begin
             errorStrobeOut => ctrlErrorStrobeOut,
             -- i2c i/o
             sClkOut        => sClkOut,
-            sDataIO        => sDataIO
+            sDataIo        => sDataIO
         );
 
     i2cSlave : entity work.i2c_slave_model
@@ -96,6 +96,7 @@ begin
         ctrlDataAddrIn     <= TEST_DATA_ADDR;
         ctrlDataIn         <= TEST_DATA;
         ctrlEnableStrobeIn <= true;
+
         wait until rising_edge(clkIn);
         ctrlEnableStrobeIn <= false;
 

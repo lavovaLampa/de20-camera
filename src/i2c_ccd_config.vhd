@@ -92,14 +92,14 @@ begin
         port map(
             clkIn          => clkIn,
             rstAsyncIn     => rstAsyncIn,
-            enableInStrobe => ctrlEnable,
+            enableStrobeIn => ctrlEnable,
             dataIn         => ctrlData,
             devAddrIn      => devAddr,
             dataAddrIn     => dataAddr,
             doneStrobeOut        => ctrlDone,
             errorStrobeOut       => ctrlError,
             sClkOut        => sClkOut,
-            sDataIO        => sDataIO
+            sDataIo        => sDataIO
         );
 
 end architecture RTL;
