@@ -47,9 +47,9 @@ begin
 
     initProc : process(clkIn, rstAsyncIn)
         -- reg
-        variable currState      : Internal_State_T                           := InitDelay;
-        -- we have to refresh all rows 2 times -> 2 * 2**ROW_ADDR_WIDTH = 2**(ROW_ADDR_WIDTH + 1)
-        variable refreshCounter : natural range 0 to 2**(ROW_ADDR_WIDTH + 1) := 2**(ROW_ADDR_WIDTH + 1) - 1;
+        variable currState      : Internal_State_T     := InitDelay;
+        -- we have to issue REFRESH command atleast 2 times
+        variable refreshCounter : natural range 0 to 3 := 3;
     begin
         if rstAsyncIn = '1' then
             memInitializedOut <= false;
@@ -62,7 +62,7 @@ begin
             outputEnable <= false;
 
             currState      := InitDelay;
-            refreshCounter := 2**(ROW_ADDR_WIDTH + 1) - 1;
+            refreshCounter := 3;
         elsif rising_edge(clkIn) then
             -- by default send nop command
             clkEnable    <= '1';
