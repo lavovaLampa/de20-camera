@@ -12,14 +12,14 @@ entity i2c_ctrl is
         -- clkIn has to have 2 * sClkOut HZ (because we change sClk on each rising edge only)
         clkIn, rstAsyncIn             : in    std_logic;
         -- ctrl in
-        enableInStrobe                : in    boolean;
+        enableStrobeIn                : in    boolean;
         dataIn                        : in    I2c_Data_T;
         devAddrIn, dataAddrIn         : in    I2c_Addr_T;
         -- state out
         doneStrobeOut, errorStrobeOut : out   boolean   := false;
         -- i2c i/o
         sClkOut                       : out   std_logic := '1';
-        sDataIO                       : inout std_logic := 'Z' -- 1 == 'Z', 0 == '0' (i2c spec)
+        sDataIo                       : inout std_logic := 'Z' -- 1 == 'Z', 0 == '0' (i2c spec)
     );
 end entity i2c_ctrl;
 
@@ -46,7 +46,7 @@ begin
 
     -- i2c data conversion
     dataBusDbg <= logic_to_i2c(nextData);
-    sDataIO    <= logic_to_i2c(nextData);
+    sDataIo    <= logic_to_i2c(nextData);
 
     ctrlProc : process(clkIn, rstAsyncIn)
         type Ctrl_State_T is (Ready, SendData, ReleaseLine, WaitForAck, SendStop);
@@ -83,7 +83,7 @@ begin
 
             case currState is
                 when Ready =>
-                    if enableInStrobe then
+                    if enableStrobeIn then
                         dataAggregate := std_logic_vector(devAddrIn) & std_logic_vector(dataAddrIn) & dataIn;
                         bitPtr        := I2c_Aggregate_Ptr_T'high;
 
@@ -118,7 +118,7 @@ begin
 
                 when WaitForAck =>
                     if canReadData then
-                        if sDataIO = '0' then
+                        if sDataIo = '0' then
                             if bitPtr = 0 then
                                 nextData  <= '0';
                                 currState := SendStop;
