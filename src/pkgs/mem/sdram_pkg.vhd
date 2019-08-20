@@ -7,28 +7,32 @@ library osvvm;
 context osvvm.OsvvmContext;
 
 package sdram_pkg is
-    -- input clk period
-    constant CLK_PERIOD : time := 7.5 ns;
+    -- input clk period (required for wait cycle computation)
+    constant CLK_PERIOD : time := 10 ns;
 
     -- sdram port widths
-    constant BANK_ADDR_WIDTH : natural := 2;
-    constant ROW_ADDR_WIDTH  : natural := 12;
-    constant COL_ADDR_WIDTH  : natural := 8;
-    constant DATA_WIDTH      : natural := 16;
-    constant DQM_WIDTH       : natural := DATA_WIDTH / 8;
+    constant BANK_ADDR_WIDTH : positive := 2;
+    constant ROW_ADDR_WIDTH  : positive := 12;
+    constant COL_ADDR_WIDTH  : positive := 8;
+    constant DATA_WIDTH      : positive := 16;
+    constant DQM_WIDTH       : positive := DATA_WIDTH / 8;
 
     -- useful computed constants
-    constant BANK_COUNT : natural := 2**BANK_ADDR_WIDTH;
-    constant PAGE_LEN   : natural := 2**COL_ADDR_WIDTH;
+    constant ADDR_WIDTH      : positive := ROW_ADDR_WIDTH + COL_ADDR_WIDTH + BANK_ADDR_WIDTH; -- full addressable space width
+    constant PORT_ADDR_WIDTH : positive := maximum(ROW_ADDR_WIDTH, maximum(COL_ADDR_WIDTH, BANK_ADDR_WIDTH)); -- widest address
+    constant BANK_COUNT      : positive := 2**BANK_ADDR_WIDTH;
+    constant PAGE_LEN        : positive := 2**COL_ADDR_WIDTH;
 
     -- i/o types
-    subtype Addr_T is unsigned(ROW_ADDR_WIDTH - 1 downto 0);
+    subtype Addr_T is unsigned(PORT_ADDR_WIDTH - 1 downto 0);
+    subtype Row_Addr_T is unsigned(ROW_ADDR_WIDTH - 1 downto 0);
     subtype Col_Addr_T is unsigned(COL_ADDR_WIDTH - 1 downto 0);
     subtype Bank_Addr_T is unsigned(BANK_ADDR_WIDTH - 1 downto 0);
     subtype Data_T is std_logic_vector(DATA_WIDTH - 1 downto 0);
     subtype Dqm_T is std_logic_vector(DQM_WIDTH - 1 downto 0);
 
     -- internal types/data ranges
+    subtype Input_Addr_Ptr_T is natural range 0 to 2**PORT_ADDR_WIDTH - 1;
     subtype Row_Ptr_T is natural range 0 to 2**ROW_ADDR_WIDTH - 1;
     subtype Col_Ptr_T is natural range 0 to 2**COL_ADDR_WIDTH - 1;
     subtype Bank_Ptr_T is natural range 0 to BANK_COUNT - 1;
@@ -38,11 +42,11 @@ package sdram_pkg is
     type Sdram_State_T is (Idle, ReadBurst, WriteBurst, AccessingModeReg);
 
     -- SDRAM commands
-    type Cmd_T is (CmdInhibit, NoOp, Active, Read, Write, BurstTerminate, Precharge, Refresh, LoadModeReg);
+    type Cmd_T is (CmdInhibit, NoOp, Active, Read, Write, Precharge, Refresh, BurstTerminate, LoadModeReg);
     -- Mode register burst types
     type Burst_Type_T is (Interleaved, Sequential);
     -- Mode register burst length
-    subtype Burst_Length_T is natural range 0 to 2**ROW_ADDR_WIDTH;
+    subtype Burst_Length_T is natural range 0 to 2**COL_ADDR_WIDTH;
     -- Mode register latency mode
     subtype Latency_Mode_T is natural range 2 to 3;
     -- Mode register write burst mode
@@ -55,6 +59,7 @@ package sdram_pkg is
         writeBurstMode : Write_Burst_Mode_T;
     end record Mode_Reg_R;
 
+    -- grouped SDRAM command encoding signals
     type Cmd_Aggregate_R is record
         chipSelectNeg    : std_logic;
         rowAddrStrobeNeg : std_logic;
@@ -65,7 +70,6 @@ package sdram_pkg is
     type Mem_IO_R is record
         addr         : Addr_T;
         bankSelect   : Bank_Addr_T;
-        data         : Data_T;
         clkEnable    : std_logic;
         cmdAggregate : Cmd_Aggregate_R;
         -- x16 input/output data mask
@@ -87,7 +91,7 @@ package sdram_pkg is
 
     -- command timings
     -- TODO: do i need this timing?
-    constant tARFC   : time := 60 ns;
+    constant tARFC   : time := 60 ns;   -- one Auto Refresh cycle time [shortest refresh strobe (Refresh -> Refresh)] (in some SDRAMs tARFC = tRC)
     constant tRC     : time := 60 ns;   -- row cycle (ref to ref / activate to activate) [shortest row access strobe (Idle -> Access -> Idle)]
     constant tRASmin : time := 42 ns;   -- row address strobe (activate to precharge) [shortest row access time (capacitors take time to recover)]
     constant tRASmax : time := 100 us;  -- row active hold time [longest time row can be held active]
@@ -97,7 +101,7 @@ package sdram_pkg is
     constant tDPL    : time := 2 * CLK_PERIOD; -- input data to Precharge command delay (also defined as tWR)
     constant tDAL    : time := (2 * CLK_PERIOD) + tRP; -- input data to Active/Refresh command delay (during Auto Precharge)
     constant tXSR    : time := 60 ns;   -- exit to Self Refresh to Active
-    constant tREF    : time := 64 ms;   -- Refresh cycle time (all rows) [4096 for current SDRAM]
+    constant tREF    : time := 64 ms;   -- max. Refresh cycle time (all rows) [4096 rows for current SDRAM]
 
     -- command-related timings defined in clock cycles
     -- tDAL : natural := 5;
@@ -146,6 +150,7 @@ package sdram_pkg is
     constant tDALCycles    : natural;   -- input data to Active/Refresh command delay (during Auto Precharge)
     constant tXSRCycles    : natural;   -- exit to Self Refresh to Active
     constant tREFCycles    : natural;   -- Refresh cycle time (all rows) [4096 for current SDRAM]
+    constant tARFCCycles   : natural;   -- 
 
     -- encode/decode sdram commands (read, write, etc.)
     pure function decode_cmd(chipSelectNeg, rowAddrStrobeNeg, colAddrStrobeNeg, writeEnableNeg : std_logic) return Cmd_T;
@@ -209,6 +214,7 @@ package body sdram_pkg is
     constant tDALCycles    : natural := time_to_cycles(tDAL);
     constant tXSRCycles    : natural := time_to_cycles(tXSR);
     constant tREFCycles    : natural := time_to_cycles(tREF);
+    constant tARFCCycles   : natural := time_to_cycles(tARFC);
 
     -- functions
     pure function cmd_delay(cmd : Cmd_T) return natural is
@@ -217,7 +223,7 @@ package body sdram_pkg is
             when Active                                     => return tRCDCycles;
             when Read                                       => return tCAS;
             when Precharge                                  => return tRPCycles;
-            when Refresh                                    => return tRCCycles;
+            when Refresh                                    => return tARFCCycles;
             when LoadModeReg                                => return tMRD;
             when CmdInhibit | NoOp | Write | BurstTerminate => return 1;
         end case;

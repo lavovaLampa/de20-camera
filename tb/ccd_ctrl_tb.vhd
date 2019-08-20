@@ -1,30 +1,43 @@
 library ieee;
 use ieee.std_logic_1164.all;
 use ieee.numeric_std.all;
+
 use std.textio.all;
-use work.ccd_ctrl_pkg.all;
-use work.common_pkg.all;
-use work.ccd_ctrl;
+
+use work.ccd_pkg.all;
+use work.ccd_model_pkg.all;
+use work.img_pkg.Pixel_Aggregate_T;
+use work.img_pkg.Pixel_Color_T;
+use work.img_pkg.Pixel_Data_T;
+
+library osvvm;
+context osvvm.OsvvmContext;
 
 entity ccd_ctrl_tb is
-    constant CLK_PERIOD       : time    := 20 ns; -- 50 MHz clock
-    constant TEST_FRAME_COUNT : natural := 2;
-    -- real constants are way higher
+    constant CLK_PERIOD : time := 20 ns; -- 50 MHz clock
+
+    constant TEST_HEIGHT      : natural := 64;
+    constant TEST_WIDTH       : natural := 84;
+    constant TEST_FRAME_COUNT : natural := 20;
+
+    constant CCD_CTRL_TB_ALERT_ID : AlertLogIDType := GetAlertLogID("Ccd Ctrl TestBench", ALERTLOG_BASE_ID);
 end ccd_ctrl_tb;
 
 architecture test of ccd_ctrl_tb is
     -- dut interfacing signals
     signal clkIn, rstAsyncIn          : std_logic        := '0';
     signal frameValid, lineValid      : std_logic        := '0';
-    signal pixelData                  : CCD_Pixel_Data_T := X"000";
-    signal pixelOut                   : Pixel_Aggregate;
-    signal pixelValidOut, frameEndOut : boolean;
+    signal pixelData                  : Ccd_Pixel_Data_T := X"000";
+    signal pixelOut                   : Pixel_Data_T;
+    signal pixelValid, frameEndStrobe : boolean;
+    signal hBlank, vBlank             : boolean;
+    signal currHeight                 : Ccd_Img_Height_Ptr_T;
+    signal currWidth                  : Ccd_Img_Width_Ptr_T;
+    signal pixelCounter               : Ccd_Img_Pixel_Ptr_T;
 
     signal nRstAsync, pixClk : std_logic;
     signal frameDone         : boolean;
-
-    -- mocked ccd array data
-    signal ccdArray : CCD_Matrix_T := (others => (others => X"000"));
+    signal configUpdate      : boolean;
 
     -- testbench signals
     signal tbClock    : std_logic := '0';
@@ -36,27 +49,32 @@ begin
 
     nRstAsync <= not rstAsyncIn;
 
-    dut : entity ccd_ctrl
-        port map(clkIn         => pixClk,
-                 rstAsyncIn    => rstAsyncIn,
-                 frameValidIn  => frameValid,
-                 lineValidIn   => lineValid,
-                 pixelDataIn   => pixelData,
-                 pixelOut      => pixelOut,
-                 frameEndOut   => frameEndOut,
-                 pixelValidOut => pixelValidOut);
+    dut : entity work.ccd_ctrl
+        port map(
+            clkIn             => pixClk,
+            rstAsyncIn        => rstAsyncIn,
+            frameValidIn      => frameValid,
+            lineValidIn       => lineValid,
+            ccdPixelIn        => pixelData,
+            -- output
+            pixelValidOut     => pixelValid,
+            frameEndStrobeOut => frameEndStrobe,
+            hBlankOut         => hBlank,
+            vBlankOut         => vBlank,
+            heightOut         => currHeight,
+            widthOut          => currWidth,
+            pixelCounterOut   => pixelCounter,
+            pixelOut          => pixelOut
+        );
 
     ccdModel : entity work.ccd_model
         generic map(
-            INIT_HEIGHT       => IMG_HEIGHT,
-            INIT_WIDTH        => IMG_WIDTH,
-            INIT_HEIGHT_START => IMG_CONSTS.height_start,
-            INIT_WIDTH_START  => IMG_CONSTS.width_start,
-            DEBUG             => true
+            INIT_HEIGHT => TEST_HEIGHT,
+            INIT_WIDTH  => TEST_WIDTH
         )
         port map(
             clkIn           => clkIn,
-            nRstAsyncIn     => nRstAsync,
+            rstAsyncNegIn   => nRstAsync,
             pixClkOut       => pixClk,
             lineValidOut    => lineValid,
             frameValidOut   => frameValid,
@@ -64,25 +82,26 @@ begin
             dataOut         => pixelData,
             sClkIn          => 'Z',
             sDataIO         => open,
-            ccdArrayIn      => ccdArray,
             frameDoneOut    => frameDone,
-            configUpdateOut => open
+            configUpdateOut => configUpdate
         );
 
     stimuli : process
+        variable randomGen : RandomPType;
     begin
+        randomGen.InitSeed(randomGen'instance_name);
         -- initialize frame pixel values
-        for y in ccdArray'range(1) loop
-            for x in ccdArray'range(2) loop
-                ccdArray(y, x) <= std_logic_vector(to_unsigned(x, CCD_Pixel_Data_T'length));
+        for y in 0 to TEST_HEIGHT - 1 loop
+            for x in 0 to TEST_WIDTH - 1 loop
+                pixelArray.setPixel(y, x, randomGen.randSlv(0, 2**12 - 1, 12));
             end loop;
         end loop;
 
         -- generate reset
         rstAsyncIn <= '1';
-        wait for 2 * CLK_PERIOD;
+        wait for 10 * CLK_PERIOD;
         rstAsyncIn <= '0';
-        wait for 2 * CLK_PERIOD;
+        wait for 10 * CLK_PERIOD;
 
         wait until falling_edge(clkIn);
 
@@ -95,88 +114,56 @@ begin
         wait;
     end process;
 
-    checkProc : process(clkIn, rstAsyncIn)
-        type Integer_Pixel_Matrix is array (2 downto 0, 2 downto 0) of natural;
-        constant NEW_HEIGHT                      : Img_Height_Range  := IMG_HEIGHT - 2;
-        constant NEW_WIDTH                       : Img_Width_Range   := IMG_WIDTH - 2;
-        variable currColor                       : CCD_Pixel_Color_T := Green1;
-        variable redColor, greenColor, blueColor : natural;
-        variable arrayX, arrayY, pixelCount      : natural           := 0;
-        variable tmpArray                        : Integer_Pixel_Matrix;
+    sanityCheckProc : process(pixClk, rstAsyncIn)
+        variable strobeCheck : boolean := false;
     begin
         if rstAsyncIn = '1' then
-            arrayY     := 1;
-            arrayX     := 1;
-            pixelCount := 0;
-        elsif rising_edge(clkIn) then
-            if pixelValidOut then
-                currColor := getCurrColor(arrayY, arrayX);
+            strobeCheck := false;
+        elsif rising_edge(pixClk) then
+            AlertIfNot(CCD_CTRL_TB_ALERT_ID, (pixelValid xor frameEndStrobe) or (not pixelValid and not frameEndStrobe), "Invalid frame end/new pixel signals state");
 
-                --                report "Current (relative) pixel coords (y, x): " & natural'image(arrayY) & ", " & natural'image(arrayX);
-                for y in 0 to 2 loop
-                    for x in 0 to 2 loop
-                        tmpArray(y, x) := to_integer(unsigned(ccdArray(arrayY + y - 1, arrayX + x - 1)(11 downto 4)));
-                        --                            report "tmpArray (" & natural'image(y) & ", " & natural'image(x) & "): " & integer'image(tmpArray(y, x));
-                    end loop;
-                end loop;
+            if frameEndStrobe then
+                AlertIf(CCD_CTRL_TB_ALERT_ID, strobeCheck, "Frame end signal active for more than 1 clock cycle (not strobe)");
 
-                -- demosaicing
-                case currColor is
-                    when Red =>
-                        redColor   := tmpArray(1, 1);
-                        greenColor := (tmpArray(0, 1) + tmpArray(1, 0) + tmpArray(1, 2) + tmpArray(2, 1)) / 4;
-                        blueColor  := (tmpArray(0, 0) + tmpArray(0, 2) + tmpArray(2, 0) + tmpArray(2, 2)) / 4;
-
-                    when Blue =>
-                        blueColor  := tmpArray(1, 1);
-                        greenColor := (tmpArray(0, 1) + tmpArray(1, 0) + tmpArray(1, 2) + tmpArray(2, 1)) / 4;
-                        redColor   := (tmpArray(0, 0) + tmpArray(0, 2) + tmpArray(2, 0) + tmpArray(2, 2)) / 4;
-
-                    when Green1 =>
-                        greenColor := tmpArray(1, 1);
-                        redColor   := (tmpArray(1, 0) + tmpArray(1, 2)) / 2;
-                        blueColor  := (tmpArray(0, 1) + tmpArray(2, 1)) / 2;
-
-                    when Green2 =>
-                        greenColor := tmpArray(1, 1);
-                        blueColor  := (tmpArray(1, 0) + tmpArray(1, 2)) / 2;
-                        redColor   := (tmpArray(0, 1) + tmpArray(2, 1)) / 2;
-
-                end case;
-
-                -- computed colors should be equal
-                assert redColor = to_integer(pixelOut(Red))
-                report "Wrong red color value received at (height, width): " & integer'image(arrayY) & " x " & integer'image(arrayX) & LF &
-                "Expected: " & natural'image(redColor) & LF &
-                "Received: " & natural'image(to_integer(pixelOut(Red))) severity failure;
-
-                assert greenColor = to_integer(pixelOut(Green))
-                report "Wrong green color value received at (height, width): " & integer'image(arrayY) & " x " & integer'image(arrayX) & LF &
-                "Expected: " & natural'image(greenColor) & LF &
-                "Received: " & natural'image(to_integer(pixelOut(Green))) severity failure;
-
-                assert blueColor = to_integer(pixelOut(Blue))
-                report "Wrong blue color value received at (height, width): " & integer'image(arrayY) & " x " & integer'image(arrayX) & LF &
-                "Expected: " & natural'image(blueColor) & LF &
-                "Received: " & natural'image(to_integer(pixelOut(Blue))) severity failure;
-
-                pixelCount := pixelCount + 1;
-                if (arrayX >= NEW_WIDTH) then
-                    arrayX := 1;
-                    arrayY := arrayY + 1;
-                else
-                    arrayX := arrayX + 1;
-                end if;
-
-            elsif frameEndOut and pixelCount /= 0 then
-                assert pixelCount = NEW_HEIGHT * NEW_WIDTH report "Wrong number of pixels recived" & LF &
-                "Expected: " & positive'image(NEW_HEIGHT * NEW_WIDTH) & LF &
-                "Received: " & positive'image(pixelCount) severity failure;
-
-                pixelCount := 0;
-                arrayY     := 1;
-                arrayX     := 1;
+                strobeCheck := true;
+            else
+                strobeCheck := false;
             end if;
         end if;
-    end process checkProc;
+    end process sanityCheckProc;
+
+    blankingCheckProc : process(pixClk, nRstAsync)
+    begin
+        if falling_edge(pixClk) and nRstAsync /= '0' then
+            AlertIf(CCD_CTRL_TB_ALERT_ID, pixelValid and (hBlank or vBlank), "Controller cannot output valid pixel during a blanking period");
+            AlertIfNot(CCD_CTRL_TB_ALERT_ID, hBlank xor lineValid = '1', "Controller doesn't output correct sensor horizontal blanking state");
+            AlertIfNot(CCD_CTRL_TB_ALERT_ID, vBlank xor frameValid = '1', "Controller doesn't output correct sensor horizontal blanking state");
+        end if;
+    end process blankingCheckProc;
+
+    pixelCountCheckProc : process(pixClk, nRstAsync)
+        variable counter : natural := 0;
+    begin
+        if nRstAsync = '0' then
+            counter := 0;
+        elsif rising_edge(pixClk) then
+            AlertIfNot(CCD_CTRL_TB_ALERT_ID, pixelCounter = (currHeight * TEST_WIDTH) + currWidth, "Incorrect pixel count reported" & LF & "Expected: " & to_string((currHeight * TEST_WIDTH) + currWidth) & LF & "Got: " & to_string(pixelCounter));
+
+            if pixelValid then
+                counter := counter + 1;
+            elsif frameEndStrobe then
+                AlertIfNot(CCD_CTRL_TB_ALERT_ID, counter = TEST_HEIGHT * TEST_WIDTH or counter = 0, "Incorrect number of pixels received" & LF & "Expected: " & to_string(TEST_HEIGHT * TEST_WIDTH) & LF & "Got: " & to_string(counter));
+                counter := 0;
+            end if;
+        end if;
+    end process pixelCountCheckProc;
+
+    pixelDataCheck : process(currHeight, currWidth, pixelOut, pixelValid)
+    begin
+        if pixelValid then
+            AlertIfNot(CCD_CTRL_TB_ALERT_ID, pixelArray.getPixel(currHeight, currWidth)(11 downto 4) = std_logic_vector(pixelOut),
+                       "Incorrect pixel data received at position (height x width): " & to_string(currHeight) & " x " & to_string(currWidth) & LF & "Expected: " & to_hstring(pixelArray.getPixel(currHeight, currWidth)(11 downto 4)) & LF & "Got: " & to_hstring(pixelOut));
+        end if;
+    end process pixelDataCheck;
+
 end test;

@@ -13,29 +13,31 @@ context osvvm.OsvvmContext;
 -- SDRAM must support CONCURRENT AUTO PRECHARGE
 entity sdram_model is
     generic(
-        -- simulation settings
-        LOAD_FROM_FILE   : boolean := false; -- whether to load memory content from file
-        DUMP_TO_FILE     : boolean := false; -- whether to store memory content to a file
-        INPUT_FILE_NAME  : string  := "input_fjel.txt"; -- name of a file to be loaded
-        OUTPUT_FILE_NAME : string  := "output_fjel.txt" -- name of a file to be dumped
+        -- model simulation settings
+        LOAD_FROM_FILE  : boolean := false; -- whether to load memory content from file
+        DUMP_TO_FILE    : boolean := false; -- whether to store memory content to a file
+        INPUT_FILENAME  : string  := "input_fjel.txt"; -- name of a file to be loaded
+        OUTPUT_FILENAME : string  := "output_fjel.txt" -- name of a file to be dumped
     );
     port(
         clkIn                                : in    std_logic;
         addrIn                               : in    Addr_T;
-        dataIn                               : inout Data_T  := (others => 'Z');
+        dataIo                               : inout Data_T  := (others => 'Z');
         bankSelectIn                         : in    Bank_Addr_T;
         clkEnableIn                          : in    std_logic;
         chipSelectNegIn, rowAddrStrobeNegIn  : in    std_logic;
         colAddrStrobeNegIn, writeEnableNegIn : in    std_logic;
         dqmIn                                : in    std_logic_vector(1 downto 0);
         -- debug signals
-        isInitialized                        : out   boolean := false;
-        simEnded                             : in    boolean
+        isInitializedOut                     : out   boolean := false;
+        simEndedIn                           : in    boolean
     );
+    constant SDRAM_ALERT_ID        : AlertLogIDType := GetAlertLogID("SDRAM", ALERTLOG_BASE_ID);
+    constant MEMORY_MODEL_ALERT_ID : AlertLogIDType := GetAlertLogID("Memory Model", SDRAM_ALERT_ID);
 end entity sdram_model;
 
 architecture model of sdram_model is
-    -- mode register (register)
+    -- mode register (reg)
     signal modeReg : std_logic_vector(DATA_WIDTH - 1 downto 0) := encode_mode_reg(1, Sequential, 2, ProgrammedLength);
 
     -- decoded current command on input (wire) (non-latched)
@@ -48,11 +50,20 @@ architecture model of sdram_model is
     signal writeBurstMode : Write_Burst_Mode_T := ProgrammedLength;
 
     -- internal signals (reg)
-    signal clkInternal : std_logic := '0';
+    signal clkInternal     : std_logic           := '0';
+    signal dataOutPipeline : Data_Out_Pipeline_T := (others => (others => 'Z'));
+    signal dataInPipeline  : Data_In_Pipeline_T  := (others => (data => (others => 'Z'), dqm => (others => '0')));
 
-    -- input data latch (register)
+    -- input cmd/addr latch (register)
     signal inputReg : Input_Latch_R;
 begin
+    -- initialize memory model in shared variable
+    memoryModel.MemInit(ADDR_WIDTH, DATA_WIDTH);
+    memoryModel.SetAlertLogID(MEMORY_MODEL_ALERT_ID);
+
+    -- mask data according to dqm
+    -- if mask bit is low, allow data to be read from target byte
+    dataIo <= mask_data(dataOutPipeline(0), dataInPipeline(tDQZ - 1).dqm);
 
     decodeBlock : block
         signal clkEnabled : std_logic := '0';
@@ -70,13 +81,16 @@ begin
         begin
             if rising_edge(clkInternal) then
                 -- latch signals on rising edge of clk
-                inputReg <= (
+                inputReg               <= (
                     addr => addrIn,
-                    dqm  => dqmIn,
                     cmd  => currCmd,
-                    bank => bankSelectIn,
-                    data => dataIn
+                    bank => bankSelectIn
                 );
+                dataInPipeline(0)      <= (
+                    data => dataIo,
+                    dqm  => dqmIn
+                );
+                dataInPipeline(1 to 3) <= dataInPipeline(0 to 2);
             end if;
         end process latchProc;
 
@@ -96,8 +110,6 @@ begin
     end block decodeBlock;
 
     ctrlBlock : block
-        type Data_Out_Pipeline_T is array (0 to 9) of Data_T;
-
         -- TODO: is the upper counter limit OK?
         type Bank_State_Helper_R is record
             counting           : boolean;
@@ -117,17 +129,16 @@ begin
         end function bank_schedule_transition;
 
         -- ctrl/banks state representation (reg)
-        signal banks           : Bank_Array_T        := (others => (state => Idle, row => 0));
-        signal ctrl            : Ctrl_State_R;
-        signal dataOutPipeline : Data_Out_Pipeline_T := (others => (others => 'Z'));
+        signal banks : Bank_Array_T := (others => (state => Idle, row => 0));
+        signal ctrl  : Ctrl_State_R;
 
         -- debug signals
         signal bankCountersDbg : Bank_Helpers_T;
+        signal burstCounterDbg : natural;
 
     begin
         bankCtrl : process(clkInternal)
-            -- store timings
-
+            -- state regs
             -- times bank state changes
             variable bankCounters  : Bank_Helpers_T := (others => (counting => false, counter => 0, scheduledPrecharge => false));
             -- times subsequent active commands
@@ -152,14 +163,14 @@ begin
                         banks(i).state          <= Precharging;
                         bankCounters(i).counter := bank_transition_delay(Precharging, bank_next_state(Precharging));
 
-                        Log("Bank " & to_string(i) & " state change scheduled: " & Bank_State_T'image(banks(i).state) & " --> " & Bank_State_T'image(Precharging), DEBUG);
+                        Log(SDRAM_ALERT_ID, "Bank " & to_string(i) & " state change scheduled: " & Bank_State_T'image(banks(i).state) & " --> " & Bank_State_T'image(Precharging), DEBUG);
                     end if;
 
                     if bankCounters(i).counting then
                         if bankCounters(i).counter = 0 then
                             banks(i).state <= bank_next_state(banks(i).state);
 
-                            Log("Bank " & to_string(i) & " state change scheduled: " & Bank_State_T'image(banks(i).state) & " --> " & Bank_State_T'image(bank_next_state(banks(i).state)), DEBUG);
+                            Log(SDRAM_ALERT_ID, "Bank " & to_string(i) & " state change scheduled: " & Bank_State_T'image(banks(i).state) & " --> " & Bank_State_T'image(bank_next_state(banks(i).state)), DEBUG);
 
                             -- if bank is Active schedule transition from ActiveIdle to ActiveRecharging
                             if banks(i).state = Activating then
@@ -176,11 +187,6 @@ begin
                 -- decrement Active counter
                 if activeCounter > 0 then
                     activeCounter := activeCounter - 1;
-                end if;
-
-                -- debug log
-                if inputReg.cmd /= NoOp and inputReg.cmd /= CmdInhibit then
-                    Log("Received command: " & Cmd_T'image(inputReg.cmd), INFO);
                 end if;
 
                 -- handle current command on input latch
@@ -208,7 +214,7 @@ begin
                         bankCounters(bankPtr) := bank_schedule_transition(Activating, bank_next_state(Activating));
                         activeCounter         := tRRDCycles;
 
-                        Log("Bank " & to_string(bankPtr) & " state change scheduled: " & Bank_State_T'image(banks(bankPtr).state) & " --> " & Bank_State_T'image(Activating), DEBUG);
+                        Log(SDRAM_ALERT_ID, "Bank " & to_string(bankPtr) & " state change scheduled: " & Bank_State_T'image(banks(bankPtr).state) & " --> " & Bank_State_T'image(Activating), DEBUG);
 
                     -- close activated row (if idle does nothing)
                     -- a10 flags selects whether to Precharge all banks (a10 HIGH -> Precharge All)
@@ -240,7 +246,7 @@ begin
                                     banks(i).state  <= Precharging;
                                     bankCounters(i) := bank_schedule_transition(Precharging, bank_next_state(Precharging));
 
-                                    Log("Bank " & to_string(i) & " state change scheduled: " & Bank_State_T'image(banks(i).state) & " --> " & Bank_State_T'image(Precharging), DEBUG);
+                                    Log(SDRAM_ALERT_ID, "Bank " & to_string(i) & " state change scheduled: " & Bank_State_T'image(banks(i).state) & " --> " & Bank_State_T'image(Precharging), DEBUG);
                                 end if;
                             end loop;
                         else            -- precharge only selected bank
@@ -264,7 +270,7 @@ begin
                                 banks(bankPtr).state  <= Precharging;
                                 bankCounters(bankPtr) := bank_schedule_transition(Precharging, bank_next_state(Precharging));
 
-                                Log("Bank " & to_string(bankPtr) & " state change scheduled: " & Bank_State_T'image(banks(bankPtr).state) & " --> " & Bank_State_T'image(Precharging), DEBUG);
+                                Log(SDRAM_ALERT_ID, "Bank " & to_string(bankPtr) & " state change scheduled: " & Bank_State_T'image(banks(bankPtr).state) & " --> " & Bank_State_T'image(Precharging), DEBUG);
                             end if;
                         end if;
 
@@ -283,7 +289,7 @@ begin
                             banks(i).state  <= Refreshing;
                             bankCounters(i) := bank_schedule_transition(Refreshing, bank_next_state(Refreshing));
 
-                            Log("Bank " & to_string(i) & " state change scheduled: " & Bank_State_T'image(banks(i).state) & " --> " & Bank_State_T'image(Refreshing), DEBUG);
+                            Log(SDRAM_ALERT_ID, "Bank " & to_string(i) & " state change scheduled: " & Bank_State_T'image(banks(i).state) & " --> " & Bank_State_T'image(Refreshing), DEBUG);
                         end loop;
                         null;
 
@@ -303,7 +309,7 @@ begin
                                 banks(ctrl.currBank).state  <= Precharging;
                                 bankCounters(ctrl.currBank) := bank_schedule_transition(Precharging, bank_next_state(Precharging));
 
-                                Log("Bank " & to_string(ctrl.currBank) & " state change scheduled: " & Bank_State_T'image(banks(ctrl.currBank).state) & " --> " & Bank_State_T'image(Precharging), DEBUG);
+                                Log(SDRAM_ALERT_ID, "Bank " & to_string(ctrl.currBank) & " state change scheduled: " & Bank_State_T'image(banks(ctrl.currBank).state) & " --> " & Bank_State_T'image(Precharging), DEBUG);
                             elsif banks(ctrl.currBank).state = ActiveRecharging then
                                 bankCounters(ctrl.currBank).scheduledPrecharge := true;
                             else
@@ -321,71 +327,34 @@ begin
 
         -- main controlling process
         mainCtrl : process
-            type Mem_Row_T is array (0 to 2**COL_ADDR_WIDTH - 1) of bit_vector(DATA_WIDTH - 1 downto 0);
-            type Mem_Row_Ptr_T is access Mem_Row_T;
-            type Mem_Bank_T is array (0 to 2**ROW_ADDR_WIDTH - 1) of Mem_Row_Ptr_T;
-            type Mem_Bank_Array_T is array (Bank_Ptr_T) of Mem_Bank_T;
-
-            -- memory data storage
-            variable bankData : Mem_Bank_Array_T;
-
-            -- helper memory procedures
-            procedure init_mem(bank : in Bank_Ptr_T; row : in Row_Ptr_T) is
-            begin
-                if bankData(bank)(row) = NULL then
-                    bankData(bank)(row) := new Mem_Row_T;
-                    for col in Col_Ptr_T loop
-                        bankData(bank)(row)(col) := (others => '0');
-                    end loop;
-                end if;
-            end procedure init_mem;
-
             procedure write_mem(bank : in Bank_Ptr_T; row : in Row_Ptr_T; col : in Col_Ptr_T; data : in Data_T; dqm : in std_logic_vector(1 downto 0)) is
+                variable fullAddr : Full_Addr_T := addr_ptr_to_addr(bank, row, col);
+                variable currData : Data_T      := memoryModel.MemRead(fullAddr);
             begin
-                -- if data = all zeroes, we don't have to do nothing, that's the default state of mem
-                if data /= (data'range => '0') and dqm /= (dqm'range => '1') then
-                    init_mem(bank, row);
-                    for i in dqm'range loop
-                        -- mask data according to dqm
-                        -- if mask bit is low, allow writing to target byte
-                        if dqm(i) = '0' then
-                            bankData(bank)(row)(col)(((i + 1) * 8) - 1 downto i * 8) := to_bitvector(data(((i + 1) * 8) - 1 downto i * 8));
-                        end if;
-                    end loop;
-                end if;
-            end procedure write_mem;
-
-            impure function read_mem(bank : in Bank_Ptr_T; row : in Row_Ptr_T; col : in Col_Ptr_T; dqm : in std_logic_vector(1 downto 0)) return Data_T is
-                variable tmpData : Data_T := (others => '0');
-            begin
-                if bankData(bank)(row) = NULL then
-                    tmpData := (others => '0');
-                else
-                    tmpData := to_slv(bankData(bank)(row)(col));
-                end if;
+                Log(SDRAM_ALERT_ID, "Writing to Bank: " & to_string(bank) & ", Row: " & to_string(row) & ", Col: " & to_string(col) & ", Dqm: " & to_bstring(dqm) & ", Data: " & to_hstring(data), DEBUG);
 
                 for i in dqm'range loop
                     -- mask data according to dqm
                     -- if mask bit is low, allow writing to target byte
                     if dqm(i) = '0' then
-                        tmpData(((i + 1) * 8) - 1 downto i * 8) := tmpData(((i + 1) * 8) - 1 downto i * 8);
+                        currData(((i + 1) * 8) - 1 downto i * 8) := data(((i + 1) * 8) - 1 downto i * 8);
                     end if;
                 end loop;
 
-                return tmpData;
+                memoryModel.MemWrite(fullAddr, currData);
+            end procedure write_mem;
+
+            impure function read_mem(bank : in Bank_Ptr_T; row : in Row_Ptr_T; col : in Col_Ptr_T) return Data_T is
+                variable fullAddr : Full_Addr_T := addr_ptr_to_addr(bank, row, col);
+            begin
+                Log(SDRAM_ALERT_ID, "Reading from Bank: " & to_string(bank) & ", Row: " & to_string(row) & ", Col: " & to_string(col), DEBUG);
+
+                return memoryModel.MemRead(fullAddr);
             end function read_mem;
 
-            -- tmp
-            variable loadDone                                 : boolean := false;
-            file inputFile, outputFile                        : text;
-            variable inputLine, outputLine                    : line;
-            variable bankCount, rowCount, colCount, dataWidth : natural;
-            variable rowUsed                                  : boolean;
-            variable tmpCol                                   : bit_vector(DATA_WIDTH - 1 downto 0);
-
             -- state variables
-            variable currCol      : Col_Ptr_T                                := 0;
-            variable burstCounter : natural range 0 to 2**COL_ADDR_WIDTH - 1 := 0;
+            variable currCol      : Col_Ptr_T                            := 0;
+            variable burstCounter : natural range 0 to 2**COL_ADDR_WIDTH := 0;
 
             impure function get_curr_col return Col_Ptr_T is
                 constant COL_END : natural := 2**COL_ADDR_WIDTH - 1;
@@ -407,51 +376,22 @@ begin
             variable data                           : Data_T     := (others => 'Z');
             variable isPrechargingAll, isRefreshing : boolean    := false;
         begin
-            if LOAD_FROM_FILE and not loadDone then
-                -- run only once
-                loadDone := true;
-
+            if LOAD_FROM_FILE then
                 report "Reading (sparse) memory from file, please wait..." severity note;
-                file_open(inputFile, INPUT_FILE_NAME, read_mode);
-
-                while not endfile(inputFile) loop
-                    readline(inputFile, inputLine);
-
-                    read(inputLine, bankCount);
-                    assert bankCount = BANK_COUNT;
-                    read(inputLine, rowCount);
-                    assert rowCount = 2**ROW_ADDR_WIDTH;
-                    read(inputLine, colCount);
-                    assert colCount = 2**COL_ADDR_WIDTH;
-                    read(inputLine, dataWidth);
-                    assert dataWidth = DATA_WIDTH;
-
-                    for bank in 0 to BANK_COUNT - 1 loop
-                        for row in Row_Ptr_T loop
-                            readline(inputFile, inputLine);
-                            read(inputLine, rowUsed);
-
-                            if rowUsed then
-                                init_mem(bank, row);
-                                for col in Col_Ptr_T loop
-                                    read(inputLine, tmpCol);
-                                    bankData(bank)(row)(col) := tmpCol;
-                                end loop;
-                            end if;
-                        end loop;
-                    end loop;
-                end loop;
-                file_close(inputFile);
+                memoryModel.FileReadH(INPUT_FILENAME);
             end if;
 
-            while not simEnded loop
+            while not simEndedIn loop
                 wait until rising_edge(clkInternal);
                 if rising_edge(clkInternal) then
+                    -- debug signals
+                    burstCounterDbg <= burstCounter;
+
                     -- helper variables
                     bankPtr := to_safe_natural(inputReg.bank);
                     addrPtr := to_safe_natural(inputReg.addr);
                     a10Flag := logic_to_bool(inputReg.addr(10));
-                    data    := inputReg.data;
+                    data    := dataInPipeline(0).data;
 
                     -- set additional state flags
                     isPrechargingAll := true;
@@ -461,16 +401,19 @@ begin
                         isRefreshing     := isRefreshing and banks(i).state = Refreshing;
                     end loop;
 
+                    -- increment dataOutPipeline shift register
+                    dataOutPipeline(0 to 2) <= dataOutPipeline(1 to 3);
+                    dataOutPipeline(3)      <= (others => 'Z');
+
                     -- TODO: implement single location Write option + Auto Precharge + tRDL
                     -- TODO: might be best to re-architecture
                     -- resolve scheduled Read(s)/Write(s)
                     if ctrl.state = ReadBurst or ctrl.state = WriteBurst then
-                        if ctrl.state = ReadBurst then
-                            -- FIXME: CL latency
+                        if ctrl.state = ReadBurst and inputReg.cmd /= BurstTerminate then
                             -- FIXME: add hold and setup time requirements
-                            dataOutPipeline(latencyMode - 2) <= read_mem(ctrl.currBank, banks(ctrl.currBank).row, get_curr_col, inputReg.dqm);
-                        else
-                            write_mem(ctrl.currBank, banks(ctrl.currBank).row, get_curr_col, inputReg.data, inputReg.dqm);
+                            dataOutPipeline(latencyMode - 2) <= read_mem(ctrl.currBank, banks(ctrl.currBank).row, get_curr_col);
+                        elsif ctrl.state = WriteBurst then
+                            write_mem(ctrl.currBank, banks(ctrl.currBank).row, get_curr_col, dataInPipeline(1).data, dataInPipeline(1).dqm);
                         end if;
                     end if;
 
@@ -478,7 +421,7 @@ begin
                     if ctrl.state = AccessingModeReg then
                         ctrl.state <= Idle;
 
-                        Log("Ctrl State Change scheduled: " & Sdram_State_T'image(ctrl.state) & " --> " & Sdram_State_T'image(Idle), DEBUG);
+                        Log(SDRAM_ALERT_ID, "Ctrl State Change scheduled: " & Sdram_State_T'image(ctrl.state) & " --> " & Sdram_State_T'image(Idle), DEBUG);
                     end if;
 
                     -- increment burst counter
@@ -487,7 +430,7 @@ begin
                         if ctrl.state = WriteBurst and writeBurstMode = SingleLocation then
                             ctrl.state <= Idle;
                         elsif burstCounter = burstLength then
-                            -- FullPage burst mode wraps around (only ends after user cmd)
+                            -- FullPage burst mode wraps around (only ends after user cancellation)
                             if burstLength = PAGE_LEN then
                                 burstCounter := 0;
                             else
@@ -501,6 +444,11 @@ begin
                                 null;
                             end if;
                         end if;
+                    end if;
+
+                    -- debug log
+                    if inputReg.cmd /= NoOp and inputReg.cmd /= CmdInhibit then
+                        Log(SDRAM_ALERT_ID, "Received command: " & Cmd_T'image(inputReg.cmd), INFO);
                     end if;
 
                     case inputReg.cmd is
@@ -528,10 +476,16 @@ begin
                             ctrl.currBank      <= bankPtr;
                             ctrl.autoPrecharge <= a10Flag;
 
-                            Log("Ctrl State Change scheduled: " & Sdram_State_T'image(ctrl.state) & " --> " & Sdram_State_T'image(ReadBurst), DEBUG);
+                            Log(SDRAM_ALERT_ID, "Ctrl State Change scheduled: " & Sdram_State_T'image(ctrl.state) & " --> " & Sdram_State_T'image(ReadBurst), INFO);
 
+                            -- setup burst counter
                             currCol      := addrPtr;
                             burstCounter := 0;
+
+                            -- immediately output read data
+                            dataOutPipeline(latencyMode - 2) <= read_mem(bankPtr, banks(bankPtr).row, get_curr_col);
+
+                            burstCounter := 1;
 
                         when Write =>
                             assert ctrl.state /= AccessingModeReg
@@ -551,10 +505,13 @@ begin
                             ctrl.currBank      <= bankPtr;
                             ctrl.autoPrecharge <= a10Flag;
 
-                            Log("Ctrl State Change scheduled: " & Sdram_State_T'image(ctrl.state) & " --> " & Sdram_State_T'image(WriteBurst), DEBUG);
+                            Log(SDRAM_ALERT_ID, "Ctrl State Change scheduled: " & Sdram_State_T'image(ctrl.state) & " --> " & Sdram_State_T'image(WriteBurst), INFO);
 
                             currCol      := addrPtr;
                             burstCounter := 0;
+
+                        -- immediately write input data
+                        --                            write_mem(bankPtr, banks(bankPtr).row, get_curr_col, inputReg.data, inputReg.dqm);
 
                         when BurstTerminate =>
                             assert ctrl.state = WriteBurst or ctrl.state = ReadBurst
@@ -567,7 +524,7 @@ begin
 
                             ctrl.state <= Idle;
 
-                            Log("Ctrl State Change scheduled: " & Sdram_State_T'image(ctrl.state) & " --> " & Sdram_State_T'image(Idle), DEBUG);
+                            Log(SDRAM_ALERT_ID, "Ctrl State Change scheduled: " & Sdram_State_T'image(ctrl.state) & " --> " & Sdram_State_T'image(Idle), INFO);
 
                             currCol      := 0;
                             burstCounter := 0;
@@ -583,7 +540,7 @@ begin
                                     -- truncate Read/Write burst without Auto Precharge
                                     ctrl.state <= Idle;
 
-                                    Log("Ctrl State Change scheduled: " & Sdram_State_T'image(ctrl.state) & " --> " & Sdram_State_T'image(Idle), DEBUG);
+                                    Log(SDRAM_ALERT_ID, "Ctrl State Change scheduled: " & Sdram_State_T'image(ctrl.state) & " --> " & Sdram_State_T'image(Idle), INFO);
                                 end if;
                             end if;
 
@@ -602,12 +559,12 @@ begin
                             report "Invalid Mode Register value on data input, cannot Load Mode Register"
                             severity error;
 
-                            Log("Received Load Mode Register command with payload: 0x" & to_hstring(inputReg.data), DEBUG);
+                            Log(SDRAM_ALERT_ID, "Received Load Mode Register command with payload: 0x" & to_hstring(data), INFO);
 
                             ctrl.state <= AccessingModeReg;
                             modeReg    <= data;
 
-                            Log("Ctrl State Change scheduled: " & Sdram_State_T'image(ctrl.state) & " --> " & Sdram_State_T'image(AccessingModeReg), DEBUG);
+                            Log(SDRAM_ALERT_ID, "Ctrl State Change scheduled: " & Sdram_State_T'image(ctrl.state) & " --> " & Sdram_State_T'image(AccessingModeReg), INFO);
 
                         -- Active does not terminate read/write burst
                         -- Refresh handled by bank controller
@@ -623,30 +580,9 @@ begin
                 end if;
             end loop;
 
-            if DUMP_TO_FILE and simEnded then
-                report "Dumping (sparse) memory to file, please wait..." severity note;
-                file_open(outputFile, OUTPUT_FILE_NAME, write_mode);
-
-                write(outputLine, BANK_COUNT);
-                write(outputLine, 2**ROW_ADDR_WIDTH);
-                write(outputLine, 2**COL_ADDR_WIDTH);
-                write(outputLine, DATA_WIDTH);
-                writeline(outputFile, outputLine);
-
-                for bank in Bank_Ptr_T loop
-                    for row in Row_Ptr_T loop
-                        if bankData(bank)(row) = NULL then
-                            write(outputLine, false);
-                        else
-                            write(outputLine, true);
-                            for col in Col_Ptr_T loop
-                                write(outputLine, bankData(bank)(row)(col));
-                            end loop;
-                        end if;
-                        writeline(outputFile, outputLine);
-                    end loop;
-                end loop;
-                file_close(outputFile);
+            if DUMP_TO_FILE and simEndedIn then
+                Log(SDRAM_ALERT_ID, "Dumping (sparse) memory to file: """ & OUTPUT_FILENAME & """, please wait ...", INFO);
+                memoryModel.FileWriteH(OUTPUT_FILENAME);
             end if;
 
             wait;
@@ -658,7 +594,7 @@ begin
             variable refreshCounter   : natural range 0 to 2**ROW_ADDR_WIDTH := 2**ROW_ADDR_WIDTH;
         begin
             assert NOW - lastRefreshCycle < tREF
-            report "Didn't refresh all rows in time!"
+            report "Didn't refresh all the rows in time!"
             severity error;
 
             if rising_edge(clkInternal) then
@@ -700,14 +636,14 @@ begin
 
                     when Refresh =>
                         if inputReg.cmd = Refresh then
-                            if counter = 0 then
-                                currState := SetModeReg;
-                            else
-                                counter := counter - 1;
-                            end if;
+                            counter := counter - 1;
                         elsif inputReg.cmd /= NoOp and inputReg.cmd /= CmdInhibit then
-                            report "Didn't receive a Refresh command 4096*2 times after Precharge all during initialization"
+                            report "Didn't receive a Refresh command atleast 4096*2 times after Precharge all during initialization"
                             severity error;
+                        end if;
+
+                        if counter = 0 then
+                            currState := SetModeReg;
                         end if;
 
                     when SetModeReg =>
@@ -719,7 +655,7 @@ begin
                         end if;
 
                     when Done =>
-                        isInitialized <= true;
+                        isInitializedOut <= true;
 
                 end case;
             end if;

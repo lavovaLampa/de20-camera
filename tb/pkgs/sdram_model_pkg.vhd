@@ -1,9 +1,18 @@
 library ieee;
 use ieee.std_logic_1164.all;
 use ieee.numeric_std.all;
+
 use work.sdram_pkg.all;
 
+library osvvm;
+use osvvm.MemoryPkg.all;
+
 package sdram_model_pkg is
+    -- memory model in package to be available for predictable initialization from testbench
+    shared variable memoryModel : MemoryPType;
+
+    subtype Full_Addr_T is std_logic_vector(ADDR_WIDTH - 1 downto 0);
+
     type Bank_State_R is record
         state : Bank_State_T;
         row   : Row_Ptr_T;
@@ -19,18 +28,24 @@ package sdram_model_pkg is
 
     type Input_Latch_R is record
         cmd  : Cmd_T;
-        dqm  : Dqm_T;
         addr : Addr_T;
         bank : Bank_Addr_T;
-        data : Data_T;
     end record Input_Latch_R;
 
     subtype Burst_Length_Range_T is natural range 1 to 2**COL_ADDR_WIDTH - 1;
+    type Data_IO_R is record
+        data : Data_T;
+        dqm  : Dqm_T;
+    end record Data_IO_R;
+    type Data_In_Pipeline_T is array (0 to 3) of Data_IO_R;
+    type Data_Out_Pipeline_T is array (0 to 3) of Data_T;
 
     pure function logic_to_bool(val : std_logic) return boolean;
     pure function bank_next_state(currState : Bank_State_T) return Bank_State_T;
     pure function bank_transition_valid(currState : Bank_State_T; nextState : Bank_State_T) return boolean;
     pure function to_safe_natural(val : unsigned) return natural;
+    pure function mask_data(data : Data_T; dqm : Dqm_T) return Data_T;
+    pure function addr_ptr_to_addr(bank : Bank_Ptr_T; row : Row_Ptr_T; col : Col_Ptr_T) return Full_Addr_T;
 
     -- return number of cycles required for bank to transition from currState to nextState
     pure function bank_transition_delay(currState : Bank_State_T; nextState : Bank_State_T) return natural;
@@ -104,6 +119,17 @@ package body sdram_model_pkg is
         end if;
     end function bank_transition_valid;
 
+    pure function mask_data(data : Data_T; dqm : Dqm_T) return Data_T is
+        variable tmpData : Data_T := data;
+    begin
+        for i in dqm'range loop
+            if dqm(i) = '1' then
+                tmpData(((i + 1) * 8) - 1 downto i * 8) := (others => 'Z');
+            end if;
+        end loop;
+        return tmpData;
+    end function mask_data;
+
     pure function bank_transition_delay(currState : Bank_State_T; nextState : Bank_State_T) return natural is
         type State_Delay_Map_T is array (Bank_State_T, Bank_State_T) of natural;
         constant transitionDelay : State_Delay_Map_T := (
@@ -140,4 +166,12 @@ package body sdram_model_pkg is
             severity error;
         end if;
     end function bank_transition_delay;
+
+    pure function addr_ptr_to_addr(bank : Bank_Ptr_T; row : Row_Ptr_T; col : Col_Ptr_T) return Full_Addr_T is
+        variable bankAddr : Bank_Addr_T := to_unsigned(bank, Bank_Addr_T'length);
+        variable rowAddr  : Row_Addr_T  := to_unsigned(row, Row_Addr_T'length);
+        variable colAddr  : Col_Addr_T  := to_unsigned(col, Col_Addr_T'length);
+    begin
+        return std_logic_vector(bankAddr) & std_logic_vector(rowAddr) & std_logic_vector(colAddr);
+    end function addr_ptr_to_addr;
 end package body sdram_model_pkg;

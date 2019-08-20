@@ -1,0 +1,9 @@
+1XXX Cmd Inhibit
+0111 No Operation
+0011 Active
+0101 Read
+0100 Write
+0110 Burst Terminate
+0010 Precharge
+0001 Refresh
+0000 Load Mode Register
